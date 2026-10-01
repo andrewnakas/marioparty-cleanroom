@@ -14,7 +14,7 @@ import struct
 import sys
 
 ROM_OFFSET = 0x31C7E0     # start of MainFS in the USA ROM
-ROM_END = 0xFE2310        # start of the next container (HVQ backgrounds)
+ROM_END = 0xFCB860        # start of the next container (text strings; then HVQ backgrounds at 0xFE2310)
 # lui/addiu immediates that hold the MainFS ROM address (PartyPlanner64: _mainFSOffsets MP1_USA)
 PATCH_SITES = ((0x157A6, 0x157AA), (0x3C016, 0x3C01E))
 

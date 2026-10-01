@@ -46,18 +46,7 @@ static int best_match(const uint8_t *src, int pos, int slen, int *moff) {
         while (n < maxlen && p[n] == src[pos + n]) n++;   /* overlap is fine: decoder copies byte by byte */
         if (n > best) { best = n; *moff = d; if (n == maxlen) break; }
     }
-    /* the ring is zero-filled before the start: allow runs of zeros at the very beginning */
-    if (pos < 1023 && best < maxlen) {
-        int n = 0, room = 1023 - pos;       /* zeros available behind the start */
-        while (n < maxlen && src[pos + n] == 0) n++;
-        if (n > room && pos == 0) n = n;    /* overlap continues into written zeros */
-        if (n > best && n >= 3) {
-            /* start exactly n bytes... use distance pos+1.. : pick d = pos + k with k>=1 so that all
-               bytes read are zeros: reading from virtual index -k..; after index 0 it reads src[0..],
-               so require k >= n or the data at src[0..] to be zero as well. Keep it simple: k >= n. */
-            if (pos + n <= 1023) { best = n; *moff = pos + n; }
-        }
-    }
+    /* never reference the ring before the start of the file: the game's decoder does not clear it */
     return best >= 3 ? best : 0;
 }
 
