@@ -173,6 +173,26 @@ def _selected(d, f, kind):
     return True
 
 
+def images_of(d, f, raw, tex, hooks=()):
+    """{image key: RGBA} for every image of one MainFS file (None if it holds none)."""
+    ims = images.find(raw)
+    if not ims:
+        return None
+    new = {}
+    for im in ims:
+        key = f"{d}/{f}/{im.key}"
+        out = None
+        for hook in hooks:
+            out = hook(key, tex[key])
+            if out is not None:
+                break
+        if out is not None and tex[key]["mode"] == "rgba1":
+            out = out.copy()
+            out[..., :3] = (out[..., :3] >> 4) * 17          # same 16 levels as the default rendering
+        new[im.key] = texture(key, tex[key]) if out is None else out
+    return new
+
+
 def build(retail, hooks=()):
     tex = json.load(open(os.path.join(SPEC, "textures.json")))
     have_pic = os.path.exists(os.path.join(SPEC, "pictures.json"))      # absent only in dev builds
@@ -201,24 +221,14 @@ def build(retail, hooks=()):
                 continue
             if (_off("pack1b") and e["raw"][:4] == bytes([0, 0, 0, 0x1B])) or (_off("raw32") and images.kind(e["raw"]) == "raw32"):
                 continue
-            ims = images.find(e["raw"])
-            if not ims:
+            new = images_of(d, f, e["raw"], tex, hooks)
+            if new is None:
                 continue
-            new = {}
-            for im in ims:
-                key = f"{d}/{f}/{im.key}"
-                out = None
-                for hook in hooks:
-                    out = hook(key, tex[key])
-                    if out is not None:
-                        break
-                if out is not None and tex[key]["mode"] == "rgba1":
-                    out = out.copy()
-                    out[..., :3] = (out[..., :3] >> 4) * 17          # same 16 levels as the default rendering
-                new[im.key] = texture(key, tex[key]) if out is None else out
-                n += 1
+            n += len(new)
             e["raw"] = images.rebuild(e["raw"], new)
             e["comp"] = None
+    for d, f in images.KEPT_2BIT:            # kept as it is, but stored by our own encoder like everything else
+        dirs[d][f]["comp"] = None
     b = romtool.Builder(retail)
     b.put_mainfs(dirs)
     if have_pic and not _off("bg"):

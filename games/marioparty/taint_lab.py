@@ -1,6 +1,6 @@
 """DIRTY ROOM dev tool: how many chance coincidences does each way of rendering the kept facts produce?
 
-    python -m games.marioparty.taint_lab <retail rom> pic|tex
+    python -m games.marioparty.taint_lab <retail rom> pic|tex|check
 
 Builds the retail index once, then scores several rendering variants with the same scanner the taint report uses.
 A 5-bit picture has a small alphabet, so a ramp or a dither of the same average colour easily repeats 4-pixel
@@ -129,6 +129,28 @@ def textures(retail):
               f"{len(bad)} failing {modes}", flush=True)
 
 
+def check(retail):
+    """The textures exactly as generate builds them (briefs included), scanned without building a ROM."""
+    from . import briefs
+    tex = json.load(open(os.path.join(SPEC, "textures.json")))
+    rdirs = mainfs.read(retail)
+    index = T._index(T._image_streams(rdirs))
+
+    def streams():
+        for d, files in enumerate(rdirs):
+            for f, e in enumerate(files):
+                new = generate.images_of(d, f, e["raw"], tex, (briefs.paint,))
+                if new:
+                    for im in images.find(images.rebuild(e["raw"], new)):
+                        yield f"{d}/{f}/{im.key}", im.rgba.astype(np.uint8).tobytes()
+    hits = taint.scan(index, streams())
+    bad = sorted((h for h in hits if h[3] >= taint.FAIL_RUN), key=lambda h: -h[3])
+    print(f"textures as built: {len(hits)} with coincidences, longest {max((h[3] for h in hits), default=0)} B, "
+          f"{len(bad)} failing: " + "; ".join(f"{h[0]} {h[3]} B" for h in bad[:30]))
+    near = sorted((h for h in hits if 28 <= h[3] < taint.FAIL_RUN), key=lambda h: -h[3])
+    print("close (28-31 B):", "; ".join(f"{h[0]} {h[3]}" for h in near[:30]))
+
+
 if __name__ == "__main__":
     rom = open(sys.argv[1], "rb").read()
-    (pictures if sys.argv[2] == "pic" else textures)(rom)
+    {"pic": pictures, "tex": textures, "check": check}[sys.argv[2]](rom)
