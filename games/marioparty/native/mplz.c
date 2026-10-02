@@ -35,11 +35,13 @@ EXPORT int mp_dec1(const uint8_t *src, uint8_t *dst, int dlen) {
 /* greedy encoder with one-step lazy matching; returns compressed size. dst must hold slen*9/8+16. */
 static int best_match(const uint8_t *src, int pos, int slen, int *moff) {
     int best = 0, maxlen = slen - pos, d, lo;
-    if (maxlen > 66) maxlen = 66;
+    if (maxlen > 65) maxlen = 65;      /* the format allows 66; 65 keeps long runs from stepping through the ring like every 66-step encoder */
     if (maxlen < 3) return 0;
     /* a match may start up to 1023 bytes back (distance d); ring position = (WSTART + pos - d) */
     lo = pos < 1023 ? pos : 1023;
-    for (d = 1; d <= lo; d++) {
+    /* farthest first: among equally long matches the oldest wins (a long run of one byte then always points at
+       the same ring position instead of walking through the ring) */
+    for (d = lo; d >= 1; d--) {
         const uint8_t *p = src + pos - d;
         int n = 0;
         if (p[0] != src[pos]) continue;

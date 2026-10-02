@@ -19,7 +19,7 @@ from cleanroom.audio import albank, vadpcm
 
 _dll = ctypes.CDLL(os.path.join(os.path.dirname(os.path.abspath(__file__)), "native", "mpvadpcm.dll"))
 BOOK = np.asarray(vadpcm.make_book()["book"], np.int16)      # our own 4-predictor codebook (retail size: 4)
-SFX_RATE = 22050                                              # T3 sounds carry no rate; only used for analysis
+SFX_RATE = 22050                                              # T3 sound not named by any effect: analysis rate
 
 S2_OFFSETS = (0x15396A0, 0x1778BC0)
 T3_OFFSETS = (0x1832AE0, 0x1BB8460)
@@ -62,11 +62,17 @@ def waves(rom):
         assert rom[t3:t3 + 2] == b"T3"
         hdr = t3 + 4 + struct.unpack_from(">H", rom, t3 + 2)[0] * 8
         ctl, tbl = hdr + 0x2c, t3 + _u32(rom, hdr + 0x10)
+        # effect table: {u16 id, u16, u16 0x8000 | sound index, u16 rate}; the first effect using a sound gives its rate
+        rates = {}
+        for i in range(struct.unpack_from(">H", rom, t3 + 2)[0]):
+            snd, rate = struct.unpack_from(">HH", rom, t3 + 4 + i * 8 + 4)
+            if snd & 0x8000:
+                rates.setdefault(snd & 0xFFF, rate)
         for k in range(_u32(rom, hdr + 4)):
-            rate, off = _u32(rom, ctl + k * 16 + 4), _u32(rom, ctl + k * 16 + 8)
+            off = _u32(rom, ctl + k * 16 + 8)
             if (ctl, off) not in seen:
                 seen.add((ctl, off))
-                out.append(_wave(rom, ctl, tbl, off, rate, 60, f"t3_{ti}/{k}"))
+                out.append(_wave(rom, ctl, tbl, off, rates.get(k, SFX_RATE), 60, f"t3_{ti}/{k}"))
     return out
 
 

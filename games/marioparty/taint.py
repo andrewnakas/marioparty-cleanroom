@@ -3,8 +3,8 @@
     python -m games.marioparty.taint <retail rom> <clean rom> [report.md]
 
 Four content scans (cleanroom.taint: 16-byte windows, runs >= FAIL_RUN bytes fail), like against like:
-  textures   every MainFS image as RGBA5551 words (retail vs clean, decoded from their containers)
-  pictures   every pre-rendered background tile / still as RGBA5551 words (retail: HVQ2 decoded by the game's own
+  textures   every MainFS image as RGBA bytes (retail vs clean, decoded from their containers)
+  pictures   every pre-rendered background tile / still as RGBA bytes (retail: HVQ2 decoded by the game's own
              decoder in the dirty room; clean: our CRQ pictures decoded)
   samples    every wave: decoded PCM and the stored sample bytes
   raw        the clean image from the first asset byte to the end, against the retail *stored* bytes of every
@@ -23,21 +23,39 @@ from . import audio, hvq_dirty, hvqfs, images, mainfs
 ASSETS_START = 0x31BFE0
 
 
-def _words(rgba):
-    return hvqfs.rgba5551(rgba).astype(">u2").tobytes() if rgba.shape[-1] == 4 else rgba.astype(">u2").tobytes()
+def _rgba(px):
+    """RGBA5551 words (h, w) -> RGBA8888 bytes, the same expansion the dirty decoder cache uses."""
+    out = np.empty(px.shape + (4,), np.uint8)
+    out[..., 0] = ((px >> 11) & 31) * 255 // 31
+    out[..., 1] = ((px >> 6) & 31) * 255 // 31
+    out[..., 2] = ((px >> 1) & 31) * 255 // 31
+    out[..., 3] = 255
+    return out.tobytes()
+
+
+def _index(streams, flush=6_000_000):
+    """taint.build_index with bounded memory: unique-merge every few million windows."""
+    acc, pend, npend = np.zeros(0, np.uint64), [], 0
+    for _, s in streams:
+        h, per = taint._hashes(s)
+        pend.append(h[~per])
+        npend += len(pend[-1])
+        if npend > flush:
+            acc, pend, npend = np.unique(np.concatenate([acc] + pend)), [], 0
+    return np.unique(np.concatenate([acc] + pend))
 
 
 def _image_streams(dirs):
     for d, files in enumerate(dirs):
         for f, e in enumerate(files):
             for im in images.find(e["raw"]) or ():
-                yield f"{d}/{f}/{im.key}", _words(im.rgba)
+                yield f"{d}/{f}/{im.key}", im.rgba.astype(np.uint8).tobytes()
             if (d, f) in images.GLYPH4:
                 yield f"{d}/{f}/glyphs", e["raw"][images.GLYPH4[(d, f)]:]
 
 
 def _scan(name, retail_streams, clean_streams, out):
-    index = taint.build_index(s for _, s in retail_streams)
+    index = _index(retail_streams)
     hits = taint.scan(index, clean_streams)
     bad = [h for h in hits if h[3] >= taint.FAIL_RUN]
     worst = max((h[3] for h in hits), default=0)
@@ -71,26 +89,26 @@ def main(argv):
     results = []
 
     # 1. textures
-    bad = _scan("textures", list(_image_streams(rdirs)), _image_streams(cdirs), results)
+    bad = list(_scan("textures", _image_streams(rdirs), _image_streams(cdirs), results))
 
     # 2. pictures
     def retail_pics():
         for b in range(len(hvqfs.read(retail))):
-            yield f"bg/{b}", _words(hvq_dirty.bg(b))
+            yield f"bg/{b}", hvq_dirty.bg(b).tobytes()
         for d, files in enumerate(rdirs):
             for f, e in enumerate(files):
                 if e["raw"][:4] == b"HVQ ":
-                    yield f"still/{d}/{f}", _words(hvq_dirty.fs(d, f))
+                    yield f"still/{d}/{f}", hvq_dirty.fs(d, f).tobytes()
 
     def clean_pics():
         for b, files in enumerate(hvqfs.read(clean)):
             assert all(t[:3] == b"CRQ" for t in files[1:]), "retail picture left in the clean ROM"
-            yield f"bg/{b}", b"".join(hvqfs.uncrq(t).astype(">u2").tobytes() for t in files[1:])
+            yield f"bg/{b}", b"".join(_rgba(hvqfs.uncrq(t)) for t in files[1:])
         for d, files in enumerate(cdirs):
             for f, e in enumerate(files):
                 assert e["raw"][:4] != b"HVQ ", "retail still left in the clean ROM"
                 if e["raw"][:3] == b"CRQ":
-                    yield f"still/{d}/{f}", hvqfs.uncrq(e["raw"]).astype(">u2").tobytes()
+                    yield f"still/{d}/{f}", _rgba(hvqfs.uncrq(e["raw"]))
 
     bad += _scan("pictures", retail_pics(), clean_pics(), results)
 
@@ -120,7 +138,7 @@ def main(argv):
 
     # where the images differ
     regions = [("header checksum", 0x10, 0x18),
-               ("picture decoder (ours, over the HVQ2 decoder)", hvqfs.DECODE_ROM, hvqfs.DECODE_ROM + hvqfs.DECODE_ROOM),
+               ("picture decoder (ours, over the HVQ2 decoder) + entry jump", hvqfs.CODE_ROM, hvqfs.DECODE_ROM + 8),
                ("MainFS", mainfs.ROM_OFFSET, mainfs.ROM_END),
                ("backgrounds", hvqfs.ROM_OFFSET, hvqfs.ROM_END),
                ("audio (samples, codebooks, loop states)", hvqfs.ROM_END, 0x1CED490),
@@ -163,7 +181,7 @@ def main(argv):
     failing = len(bad) + len(stray) + audio_stray + same_samples + same_images
     lines += ["", f"**{failing} failing.**"]
     if bad:
-        lines += ["", "Failing streams:"] + [f"- {h[0]} at {h[1]}: run {h[3]} B" for h in bad[:40]]
+        lines += ["", "Failing streams:"] + [f"- {h[0]} at {h[1]}: run {h[3]} B" for h in sorted(bad, key=lambda h: -h[3])[:300]]
     if len(argv) > 3:
         open(argv[3], "w").write("\n".join(lines) + "\n")
     for name, nidx, nhits, worst, b in results:

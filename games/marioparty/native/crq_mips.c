@@ -6,7 +6,7 @@
  * 0 = match (u16 distance in pixels, u16 length).  Pixels are stored XORed with the pixel above.
  *
  * "CRQ2" is a smooth picture: byte 20 = k (cell size 1 << k), payload = (h >> k) + 1 rows of (w >> k) + 1 RGB888
- * lattice points; pixels are interpolated between them, with a 2x2 ordered dither before the cut to 5 bits. */
+ * lattice points; pixels are interpolated between them, with a position-hash grain before the cut to 5 bits. */
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
@@ -23,7 +23,9 @@ void crq_decode(const u8 *code, u16 *out, u32 stride, u16 *work) {
             u32 fy = y & (cell - 1);
             for (x = 0; x < w; x++) {
                 const u8 *a = g0 + (x >> k) * 3, *b = g1 + (x >> k) * 3;
-                u32 fx = x & (cell - 1), d = ((((x ^ y) & 1) << 1) | (y & 1)) << 1, px = 1;
+                u32 fx = x & (cell - 1), d, px = 1;
+                d = x * 0x9E5 + y * 0x6B3;           /* our own grain: a hash of the position, 0..7 */
+                d = ((d >> 3) ^ (d >> 7) ^ d) & 7;
                 for (c = 0; c < 3; c++) {
                     u32 top = a[c] * (cell - fx) + a[c + 3] * fx, bot = b[c] * (cell - fx) + b[c + 3] * fx;
                     u32 v = ((top * (cell - fy) + bot * fy) >> (2 * k)) + d;

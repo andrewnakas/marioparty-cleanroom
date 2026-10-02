@@ -14,7 +14,7 @@ import numpy as np
 
 from cleanroom.audio import descriptor
 from cleanroom.decomp import gen as G
-from . import audio, hvqfs, images, mainfs, romtool
+from . import audio, briefs, hvqfs, images, mainfs, romtool
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SPEC = os.path.join(HERE, "spec")
@@ -31,9 +31,18 @@ def texture(key, d):
     w, h, mode = d["w"], d["h"], d["mode"]
     rgba = G.from_digest(key, d)
     if mode == "i":            # mask / glyph: the 2-bit outline is the picture
-        v = np.clip(_blur(G.unpack_alpha2(d["alpha2"], w, h)), 0, 255).astype(np.uint8)
+        v = _blur(G.unpack_alpha2(d["alpha2"], w, h))
+        # our own grain on the soft part (the flat black and white of a mask stay flat)
+        soft = (v > 4) & (v < 251)
+        v = np.where(soft, v * G.detail(G.h32("grain", key), w, h, 0.12, 2.0), v)
+        v = np.clip(v, 0, 255).astype(np.uint8)
         rgba = np.dstack([v, v, v, v])
-    elif mode == "ia":
+    else:
+        # our own grain, about one 5-bit step: keeps smooth ramps from landing on the same quantised steps as any
+        # other smooth ramp of the same hue
+        grain = np.random.default_rng(G.h32("grain", key)).integers(-6, 7, (h, w, 1))
+        rgba[..., :3] = np.clip(rgba[..., :3].astype(np.int16) + grain, 0, 255)
+    if mode == "ia":
         v = rgba[..., :3].astype(np.float32).mean(2).astype(np.uint8)
         rgba = np.dstack([v, v, v, rgba[..., 3]])
     elif mode == "rgb":
@@ -222,7 +231,7 @@ def build(retail, hooks=()):
 def main(argv):
     retail = open(argv[1], "rb").read()
     assert hashlib.sha1(retail).hexdigest() == romtool.RETAIL_SHA1, "not the USA ROM the tools were written for"
-    b, n = build(retail)
+    b, n = build(retail, hooks=(briefs.paint,))
     out = b.finish()
     open(argv[2], "wb").write(out)
     print(f"generate: {n} pictures and sounds regenerated; " + "; ".join(b.log))

@@ -89,10 +89,11 @@ class Builder:
         self.log.append(f"backgrounds {sum(map(len, blobs)) >> 10} KB (retail {(hvqfs.ROM_END - base) >> 10} KB)")
 
     def put_decoder(self):
-        """Our CRQ1 decoder over the game's HVQ2 decoder entry (same signature)."""
+        """Our picture decoder over the start of the game's HVQ2 decoder code, and a jump at its entry."""
         code = hvqfs.decoder_blob()
-        self.image[hvqfs.DECODE_ROM:hvqfs.DECODE_ROM + len(code)] = code
-        self.log.append(f"picture decoder {len(code)} B at {hvqfs.DECODE_ROM:#x}")
+        self.image[hvqfs.CODE_ROM:hvqfs.CODE_ROM + len(code)] = code
+        self.image[hvqfs.DECODE_ROM:hvqfs.DECODE_ROM + 8] = hvqfs.entry_jump()
+        self.log.append(f"picture decoder {len(code)} B at {hvqfs.CODE_ROM:#x}")
 
     def finish(self):
         R.finalize_crc(self.image)
