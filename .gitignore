@@ -8,3 +8,4 @@ baserom*
 games/marioparty/native/*.pdb
 games/marioparty/native/*.lib
 __pycache__/
+games/marioparty/voices/_raw/

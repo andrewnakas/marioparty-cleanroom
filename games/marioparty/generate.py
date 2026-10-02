@@ -250,7 +250,8 @@ def build(retail, hooks=()):
 def main(argv):
     retail = open(argv[1], "rb").read()
     assert hashlib.sha1(retail).hexdigest() == romtool.RETAIL_SHA1, "not the USA ROM the tools were written for"
-    b, n = build(retail, hooks=(briefs.paint,))
+    from . import voices
+    b, n = build(retail, hooks=(briefs.paint, voices.hook))
     out = b.finish()
     open(argv[2], "wb").write(out)
     print(f"generate: {n} pictures and sounds regenerated; " + "; ".join(b.log))
