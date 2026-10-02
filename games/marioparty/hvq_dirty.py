@@ -46,45 +46,38 @@ class Decoder:
         return out
 
 
-def fs_read(rom, base=0xFE2310):
-    """HVQ background container -> dirs[b] = [file bytes]; file 0 of each background is its metadata."""
-    u32 = lambda o: struct.unpack_from(">I", rom, o)[0]
-    out = []
-    for b in range(u32(base) - 1):
-        bo = base + u32(base + 4 + 4 * b)
-        n = u32(bo)
-        offs = [u32(bo + 4 + 4 * k) for k in range(n)]
-        out.append([bytes(rom[bo + offs[k]:bo + offs[k + 1]]) for k in range(n - 1)])
-    return out
+CACHE = "D:/n64work/marioparty/work/hvq"
 
 
-CACHE = "D:/n64work/marioparty/work/hvq_cache.pkl"
-
-
-def cache(rom):
-    """{("bg", b, k) | ("fs", dir, file): RGBA array}: every HVQ still of the ROM, decoded once (dirty work dir)."""
+def cache_build(rom):
+    """Decode every HVQ still once into the dirty work dir (resumable): bg<b>.npy (tiles, h, w, 4), fs<d>_<f>.npy."""
     import os
-    import pickle
-    if os.path.exists(CACHE):
-        return pickle.load(open(CACHE, "rb"))
-    from . import mainfs
-    dec, out = Decoder(rom), {}
-    for b, files in enumerate(fs_read(rom)):
-        for k, tile in enumerate(files[1:]):
-            if tile[:4] == b"HVQ ":
-                out[("bg", b, k + 1)] = dec.decode(tile)
-        if b % 10 == 0:
-            print(f"hvq bg {b}", flush=True)
+    import time
+    from . import hvqfs, mainfs
+    os.makedirs(CACHE, exist_ok=True)
+    dec, t0 = Decoder(rom), time.time()
+    for b, files in enumerate(hvqfs.read(rom)):
+        path = f"{CACHE}/bg{b}.npy"
+        if not os.path.exists(path):
+            np.save(path + ".tmp.npy", np.stack([dec.decode(t) for t in files[1:]]))
+            os.replace(path + ".tmp.npy", path)
+            print(f"hvq bg {b} ({len(files) - 1} tiles) {time.time() - t0:.0f}s", flush=True)
     for d, files in enumerate(mainfs.read(rom)):
         for f, e in enumerate(files):
-            if e["raw"][:4] == b"HVQ ":
-                out[("fs", d, f)] = dec.decode(e["raw"])
-    os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-    pickle.dump(out, open(CACHE, "wb"))
-    return out
+            path = f"{CACHE}/fs{d}_{f}.npy"
+            if e["raw"][:4] == b"HVQ " and not os.path.exists(path):
+                np.save(path, dec.decode(e["raw"]))
+    print("hvq cache: done", flush=True)
+
+
+def bg(b):
+    return np.load(f"{CACHE}/bg{b}.npy")
+
+
+def fs(d, f):
+    return np.load(f"{CACHE}/fs{d}_{f}.npy")
 
 
 if __name__ == "__main__":
     import sys
-    c = cache(open(sys.argv[1], "rb").read())
-    print(f"hvq cache: {len(c)} images")
+    cache_build(open(sys.argv[1], "rb").read())

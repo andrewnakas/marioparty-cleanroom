@@ -98,3 +98,49 @@ EXPORT int mp_enc5(const uint8_t *src, int slen, uint8_t *dst) {
     }
     return dp;
 }
+
+/* CRQ1 payload encoder (see crq_mips.c): px = w*h big-endian-agnostic u16 values; returns bytes written.
+ * dst must hold n*2 + n/4 + 16. */
+#define CH 15
+EXPORT int crq_enc(const uint16_t *px, int w, int h, uint8_t *dst) {
+    static int head[1 << CH], prev[1 << 16];
+    static uint16_t r[1 << 16];
+    int n = w * h, i, sp = 0, dp = 0, codepos = -1, bit = 8;
+    if (n > (1 << 16)) return -1;
+    for (i = 0; i < n; i++) r[i] = i >= w ? px[i] ^ px[i - w] : px[i];
+    memset(head, 0xff, sizeof head);
+    while (sp < n) {
+        int best = 0, boff = 0, tries = 64, c;
+        unsigned hsh = 0;
+        if (bit == 8) { codepos = dp++; dst[codepos] = 0; bit = 0; }
+        if (sp + 2 < n) {
+            hsh = ((r[sp] * 2654435761u) ^ (r[sp + 1] * 40503u) ^ (r[sp + 2] * 97u)) >> 7 & ((1 << CH) - 1);
+            for (c = head[hsh]; c >= 0 && tries--; c = prev[c]) {
+                int m = 0;
+                while (sp + m < n && r[c + m] == r[sp + m]) m++;
+                if (m > best) { best = m; boff = sp - c; }
+            }
+        }
+        if (best >= 3) {
+            dst[dp++] = boff >> 8; dst[dp++] = boff; dst[dp++] = best >> 8; dst[dp++] = best;
+        } else {
+            best = 1;
+            dst[codepos] |= 1 << bit;
+            dst[dp++] = r[sp] >> 8; dst[dp++] = r[sp];
+        }
+        for (i = 0; i < best; i++, sp++) {
+            if (sp + 2 < n) {
+                unsigned k = ((r[sp] * 2654435761u) ^ (r[sp + 1] * 40503u) ^ (r[sp + 2] * 97u)) >> 7 & ((1 << CH) - 1);
+                prev[sp] = head[k]; head[k] = sp;
+            }
+        }
+        bit++;
+    }
+    return dp;
+}
+
+/* reference decoder = crq_mips.c compiled for the host (round-trip tests) */
+#define crq_decode crq_host_decode_impl
+#include "crq_mips.c"
+#undef crq_decode
+EXPORT void crq_dec(const uint8_t *code, uint16_t *out, unsigned stride) { crq_host_decode_impl(code, out, stride, 0); }

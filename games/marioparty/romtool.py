@@ -7,7 +7,7 @@ appended after the retail end of data and the two lui/addiu sites that hold its 
 import struct
 
 from cleanroom import rom as R
-from . import mainfs
+from . import hvqfs, mainfs
 
 RETAIL_SHA1 = "1159bd56730094bfc71be30113e1cfc8bacf34f3"
 FREE_START = 0x1CED490      # 0xFF padding to the end of the 32 MB image
@@ -53,6 +53,31 @@ class Builder:
                 set_addr(self.image, up, lo, pos)
         self.image[pos:pos + len(data)] = data
         self.log.append(f"mainfs {len(data) >> 10} KB at {pos:#x} (retail span {span >> 10} KB)")
+
+    def put_hvqfs(self, dirs):
+        """Backgrounds: table in place; picture dirs in the retail span while they fit, the rest after the data."""
+        base, span = hvqfs.ROM_OFFSET, hvqfs.ROM_END - hvqfs.ROM_OFFSET
+        blobs = [hvqfs.pack_dir(files) for files in dirs]
+        self.image[base:hvqfs.ROM_END] = bytes(span)
+        table = bytearray(4 + 4 * (len(dirs) + 1))
+        struct.pack_into(">I", table, 0, len(dirs) + 1)
+        pos, moved = base + len(table), 0
+        for b, blob in enumerate(blobs):
+            if pos < hvqfs.ROM_END and pos + len(blob) > hvqfs.ROM_END:
+                pos = self.alloc(sum(map(len, blobs[b:])))
+                moved = len(blobs) - b
+            struct.pack_into(">I", table, 4 + 4 * b, pos - base)
+            self.image[pos:pos + len(blob)] = blob
+            pos += len(blob)
+        struct.pack_into(">I", table, 4 + 4 * len(dirs), pos - base)
+        self.image[base:base + len(table)] = table
+        self.log.append(f"backgrounds {sum(map(len, blobs)) >> 10} KB (retail span {span >> 10} KB, {moved} dirs moved)")
+
+    def put_decoder(self):
+        """Our CRQ1 decoder over the game's HVQ2 decoder entry (same signature)."""
+        code = hvqfs.decoder_blob()
+        self.image[hvqfs.DECODE_ROM:hvqfs.DECODE_ROM + len(code)] = code
+        self.log.append(f"picture decoder {len(code)} B at {hvqfs.DECODE_ROM:#x}")
 
     def finish(self):
         R.finalize_crc(self.image)
