@@ -13,7 +13,7 @@ import sys
 import numpy as np
 
 from cleanroom.decomp import gen as G
-from cleanroom.gfx import facepaint
+from cleanroom.gfx import facepaint, strokefont
 
 SPEC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "spec")
 
@@ -349,14 +349,230 @@ for _f in (0, 10):
         {"arc": [0.49, 0.68, 0.13, 0.09, 15, 165], "w": 0.035, "c": [150, 80, 50]})
     B[f"7/{_f}/b9"] = brief(W, E((0.5, 0.5), (0.42, 0.42), c=[255, 150, 150]), E((0.5, 0.5), (0.37, 0.37), c=[250, 0, 0]))
 
+# ------------------------------------------------------------------ re-typeset text (HUD words and digits)
+# T[key] = (text, top colour, bottom colour, edge colour, options). Letters are our stroke font; the picture's own
+# alpha is replaced by the alpha of what we draw.
+T = {}
+_NAME = ([255, 214, 60], [244, 96, 24], [48, 24, 72])
+for _f, _name in ((110, "MARIO"), (111, "LUIGI"), (112, "PEACH"), (113, "YOSHI"), (114, "WARIO"), (115, "DK")):
+    T[f"0/{_f}/p0"] = (_name, *_NAME, {"align": "left"})
+_DIGIT = ([255, 252, 224], [236, 226, 180], [56, 40, 36])
+for _i in range(10):
+    T[f"0/117/p{_i}"] = ("O" if _i == 0 else str(_i), *_DIGIT, {"th": 0.85, "pad": 1})
+T["0/117/p10"] = ("x", *_DIGIT, {"th": 0.8, "pad": 2})
+_COUNT = ([255, 120, 30], [226, 20, 10], [60, 10, 30])
+for _i, _c in enumerate("54321O"):
+    T[f"0/118/p{_i}"] = (_c, *_COUNT, {"th": 1.7, "slant": 0.18, "pad": 2})
+T["0/118/p6"] = ("START!", [255, 240, 80], [250, 150, 20], [120, 20, 10], {"th": 1.6})
+T["0/118/p7"] = ("FINISH!", [255, 240, 80], [250, 150, 20], [120, 20, 10], {"th": 1.6})
+
+
+def typeset(w, h, text, top, bottom, edge, th=None, slant=0.0, align="centre", edge_px=1.0, pad=1):
+    """RGBA float (h, w, 4): one line of stroke text with a vertical gradient fill and a dark edge."""
+    ss = 4
+    H, W = (h - 2 * pad) * ss, (w - 2 * pad) * ss
+    th = (th if th is not None else max(0.9, h * 0.09)) * ss
+    aspect = 0.9
+    line = strokefont.render_line(text, H, aspect=aspect, thickness=th)
+    if line.shape[1] > W:
+        aspect *= W / line.shape[1] * 0.97
+        line = strokefont.render_line(text, H, aspect=aspect, thickness=th, gap=max(ss * 0.6, th * 0.6))
+    line = line[:, :W]
+    big = np.zeros((h * ss, w * ss), np.float32)
+    x0 = pad * ss if align == "left" else pad * ss + (W - line.shape[1]) // 2
+    big[pad * ss:pad * ss + H, x0:x0 + line.shape[1]] = line
+    if slant:
+        rows = np.arange(h * ss)
+        shift = ((h * ss / 2 - rows) * slant).astype(int)
+        big = np.stack([np.roll(big[r], shift[r]) for r in rows])
+    k = int(round(edge_px * ss))
+    grown = big.copy()
+    for dy in range(-k, k + 1):
+        for dx in range(-k, k + 1):
+            if dx * dx + dy * dy <= k * k:
+                grown = np.maximum(grown, np.roll(np.roll(big, dy, 0), dx, 1))
+    t = (np.arange(h * ss, dtype=np.float32) / (h * ss - 1))[:, None, None]
+    fill = np.asarray(top, np.float32) * (1 - t) + np.asarray(bottom, np.float32) * t
+    rgb = np.asarray(edge, np.float32) * (1 - big[..., None]) + fill * big[..., None]
+    out = np.zeros((h, w, 4), np.float32)
+    out[..., :3] = rgb.reshape(h, ss, w, ss, 3).mean((1, 3))
+    out[..., 3] = grown.reshape(h, ss, w, ss).mean((1, 3)) * 255
+    return out
+
+
+# ------------------------------------------------------------------ board icons, coins, stars (dir 0)
+import math as _m
+
+GOLD, GOLD_D, GOLD_L = [252, 234, 20], [196, 156, 0], [255, 250, 150]
+
+
+def star_pts(cx, cy, ro, ri=None, rot=-90.0, aspect=1.0):
+    ri = ro * 0.45 if ri is None else ri
+    pts = []
+    for i in range(10):
+        a = _m.radians(rot + i * 36)
+        r = ro if i % 2 == 0 else ri
+        pts.append((cx + r * _m.cos(a) * aspect, cy + r * _m.sin(a)))
+    return pts
+
+
+for _f in (0, 1, 2):          # star space: gold disc with a star line
+    B[f"0/{_f}/b7"] = brief(GOLD, {"ring": [0.5, 0.5, 0.49, 0.49], "w": 0.05, "c": GOLD_D},
+                            L(star_pts(0.5, 0.52, 0.36) + [star_pts(0.5, 0.52, 0.36)[0]], 0.035, GOLD_D),
+                            E((0.36, 0.3), (0.1, 0.06), c=GOLD_L, rot=-30))
+B["0/13/b7"] = brief(          # Bowser space: black horned head on orange
+    [238, 100, 0], E((0.5, 0.5), (0.3, 0.28), c=K), E((0.5, 0.74), (0.37, 0.2), c=K),
+    P([(0.1, 0.1), (0.32, 0.26), (0.2, 0.44)], K), P([(0.9, 0.1), (0.68, 0.26), (0.8, 0.44)], K),
+    P([(0.36, 0.26), (0.43, 0.06), (0.5, 0.2), (0.57, 0.06), (0.64, 0.26)], K),
+    E((0.38, 0.44), (0.07, 0.04), c=[238, 100, 0], rot=25), E((0.62, 0.44), (0.07, 0.04), c=[238, 100, 0], rot=-25),
+    P([(0.26, 0.7), (0.36, 0.78), (0.44, 0.7), (0.5, 0.78), (0.56, 0.7), (0.64, 0.78), (0.74, 0.7), (0.66, 0.86), (0.34, 0.86)],
+      [238, 100, 0]))
+B["0/14/b7"] = brief(          # red space
+    [240, 96, 0], E((0.52, 0.56), (0.36, 0.34), c=[96, 0, 0]), E((0.34, 0.32), (0.2, 0.2), c=[96, 0, 0]),
+    E((0.52, 0.56), (0.31, 0.29), c=[204, 14, 14]), E((0.34, 0.32), (0.15, 0.15), c=[204, 14, 14]),
+    E((0.4, 0.4), (0.07, 0.05), c=[240, 90, 80]))
+B["0/15/b7"] = brief(          # happening space: a question mark
+    [244, 110, 0], {"arc": [0.5, 0.32, 0.2, 0.17, 180, 440], "w": 0.13, "c": [246, 240, 228]},
+    L([(0.57, 0.48), (0.5, 0.56), (0.5, 0.64)], 0.13, [246, 240, 228]), E((0.5, 0.84), (0.075, 0.075), c=[246, 240, 228]))
+_COIN = [{"outline": 1, "c": GOLD_D}]
+B["0/33/p0"] = brief(GOLD, {"ring": [0.5, 0.5, 0.38, 0.38], "w": 0.045, "c": GOLD_D}, E((0.36, 0.34), (0.08, 0.05), c=GOLD_L, rot=-30), *_COIN)
+B["0/33/p1"] = brief(GOLD, {"ring": [0.5, 0.5, 0.34, 0.38], "w": 0.045, "c": GOLD_D}, E((0.38, 0.34), (0.07, 0.05), c=GOLD_L, rot=-30), *_COIN)
+B["0/33/p2"] = brief(GOLD, {"ring": [0.5, 0.5, 0.2, 0.38], "w": 0.045, "c": GOLD_D}, E((0.44, 0.34), (0.04, 0.06), c=GOLD_L), *_COIN)
+B["0/33/p3"] = brief(GOLD, R(0.52, 0, 0.6, 1, GOLD_D), *_COIN)
+_STAR_EYES = {0: (0.42, 0.58), 1: (0.52, 0.63), 2: (0.6, 0.68), 14: (0.3, 0.38), 15: (0.36, 0.5)}
+for _i in range(16):
+    _ops = [E((0.5, 0.56), (0.2, 0.2), c=GOLD_L), E((0.5, 0.58), (0.17, 0.17), c=GOLD)]
+    if _i in _STAR_EYES:
+        _ops += [E((x, 0.5), (0.032, 0.085), c=K) for x in _STAR_EYES[_i]]
+    B[f"0/34/p{_i}"] = brief(GOLD, *_ops, {"outline": 1, "c": GOLD_D})
+B["0/35/p0"] = brief(          # 1-up style mushroom
+    [0, 150, 44], E((0.5, 0.8), (0.3, 0.22), c=[238, 228, 204]), E((0.5, 0.4), (0.47, 0.36), c=[0, 150, 44]),
+    E((0.5, 0.2), (0.17, 0.1), c=[236, 240, 120]), E((0.16, 0.5), (0.1, 0.13), c=[236, 240, 120]),
+    E((0.84, 0.5), (0.1, 0.13), c=[236, 240, 120]), E((0.5, 0.82), (0.24, 0.16), c=[238, 228, 204]),
+    E((0.43, 0.78), (0.03, 0.07), c=K), E((0.57, 0.78), (0.03, 0.07), c=K), {"outline": 1, "c": [0, 70, 20]})
+
+# ------------------------------------------------------------------ other characters' model textures (dir 0)
+LAV = [196, 190, 250]
+for _f in range(56, 62):       # pale green face with a dark almond eye
+    B[f"0/{_f}/b7"] = brief(
+        [172, 188, 170], P([(0.42, 0.02), (0.58, 0.02), (0.58, 0.2), (0.5, 0.27), (0.42, 0.2)], [150, 124, 222]),
+        *[E((0.84 + 0.07 * i, 0.06 + 0.06 * j), (0.02, 0.02), c=LAV) for i in range(2) for j in range(4)],
+        L([(0.18, 0.02), (0.18, 0.3)], 0.03, LAV), E((0.7, 0.38), (0.27, 0.12), c=K),
+        E((0.72, 0.38), (0.09, 0.09), c=[250, 246, 190]), E((0.72, 0.38), (0.035, 0.035), c=K))
+for _f in (62, 63):            # dark blue body
+    B[f"0/{_f}/b7"] = brief(
+        [28, 50, 124], R(0.62, 0, 1, 0.34, LAV), P([(0.84, 0.12), (0.94, 0.08), (0.94, 0.24)], [230, 20, 20]),
+        P([(0, 0.78), (0.3, 0.7), (0.62, 0.8), (1, 0.72), (1, 1), (0, 1)], [120, 130, 214]),
+        E((0.7, 0.86), (0.03, 0.03), c=W))
+KOOPA_Y, KOOPA_G = [250, 204, 44], [60, 140, 0]
+for _f in (64, 65, 66):        # Koopa Troopa: belly plates and a shell panel
+    B[f"0/{_f}/b7"] = brief(
+        KOOPA_Y, E((0.2, 0.62), (0.2, 0.3), c=[250, 190, 30]),
+        *[L([(0.02, y), (0.38, y)], 0.02, [220, 130, 0]) for y in (0.45, 0.58, 0.71, 0.84)],
+        {"ring": [0.2, 0.62, 0.2, 0.3], "w": 0.02, "c": [220, 130, 0]}, R(0.58, 0.5, 1, 1, KOOPA_G),
+        R(0.66, 0.6, 0.94, 0.94, [40, 110, 0]), R(0.73, 0.68, 0.87, 0.86, KOOPA_G), R(0, 0.1, 0.12, 0.25, KOOPA_G),
+        E((0.22, 0.26), (0.08, 0.06), c=K), L([(0.62, 0.2), (0.72, 0.14), (0.82, 0.2)], 0.015, [220, 130, 0]))
+for _f in (65, 66):
+    B[f"0/{_f}/b8"] = brief(W, E((0.5, 0.5), (0.27, 0.4), c=K), E((0.47, 0.36), (0.1, 0.17), c=W))
+B["0/67/b8"] = brief(K, {"glow": [0.5, 0.42, 0.3, 0.3], "c": [150, 150, 150]})
+# Boo: eye and mouth halves
+BOO_B = [0, 44, 230]
+for _f, _base, _dim in ((69, [120, 130, 160], 0.55), (70, W, 1.0), (71, W, 1.0)):
+    _c = lambda rgb, k=_dim: [int(v * k) for v in rgb]
+    B[f"0/{_f}/b7"] = brief(
+        _base, P([(0, 0.12), (0.5, 0.16), (0.95, 0.3), (0.8, 0.42), (0.4, 0.3), (0, 0.3)], _c([120, 170, 200])),
+        E((0.3, 0.62), (0.18, 0.33), c=_c(K)), E((0.3, 0.62), (0.13, 0.28), c=_c(BOO_B)),
+        E((0.27, 0.5), (0.05, 0.1), c=_c([90, 140, 255])))
+    B[f"0/{_f}/b8"] = brief(
+        _base, P([(0, 0.5), (0.4, 0.42), (0.75, 0.22), (0.98, 0.06), (0.9, 0.3), (0.6, 0.62), (0.3, 0.84), (0, 0.9)], _c(K)),
+        P([(0, 0.56), (0.4, 0.5), (0.72, 0.32), (0.86, 0.22), (0.56, 0.58), (0.28, 0.76), (0, 0.82)], _c([120, 0, 20])),
+        E((0.1, 0.78), (0.14, 0.09), c=_c([240, 20, 30])), P([(0.3, 0.47), (0.4, 0.44), (0.36, 0.6)], _c(W)),
+        P([(0.5, 0.42), (0.6, 0.36), (0.57, 0.52)], _c(W)))
+B["0/72/b7"] = brief(W, {"arc": [0.2, 0.5, 0.2, 0.3, 250, 330], "w": 0.03, "c": [20, 30, 90]})
+B["0/72/b8"] = brief(W, L([(0.62, 0.5), (0.02, 0.72), (0.5, 0.9)], 0.03, [20, 30, 90]))
+B["0/73/b10"] = brief([240, 0, 10], E((0.3, 0.3), (0.11, 0.11), c=W), E((0.75, 0.4), (0.17, 0.17), c=W), E((0.28, 0.82), (0.13, 0.13), c=W))
+# Koopa: spike panel, striped belly, head
+for _f, _keys in ((80, ("b7", "b8")), (84, ("b7",)), (85, ("b7", "b8")), (89, ("b7",))):
+    for _k in _keys:
+        _ops = [R(0, 0.1, 0.25, 0.5, [212, 192, 92]), P([(0.42, 0.52), (0.5, 0.05), (0.6, 0.52)], [196, 186, 186]),
+                P([(0.5, 0.05), (0.6, 0.52), (0.52, 0.52)], [150, 140, 140]), {"sphere": [0.5, 0.82, 0.1, 0.1], "c": [170, 170, 176]}]
+        if _k == "b8" or _f in (84, 89):
+            _ops.append(R(0, 0.42, 0.22, 0.52, [60, 60, 240]))
+        B[f"0/{_f}/{_k}"] = brief([140, 130, 130], *_ops)
+for _key in ("80/b10", "84/b8", "85/b10", "89/b8"):
+    B["0/" + _key] = brief(
+        [250, 168, 0], *[{"arc": [0.5, y - 0.5, 0.75, 0.56, 40, 140], "w": 0.09, "c": [255, 232, 70]} for y in (0.4, 0.64, 0.88)],
+        E((0.5, 0.0), (0.2, 0.2), c=K))
+for _key in ("80/b11", "84/b9", "85/b11", "89/b9"):
+    B["0/" + _key] = brief(W, R(0.87, 0, 0.93, 1, [200, 200, 206]))
+for _f in (80, 85):
+    B[f"0/{_f}/b9"] = brief(
+        [222, 200, 44], P([(0.5, 0.3), (0.72, 0.12), (0.95, 0.2), (1, 0.5), (0.9, 0.72), (0.62, 0.66), (0.5, 0.5)], [176, 160, 24]),
+        P([(0.56, 0.32), (0.74, 0.18), (0.92, 0.26), (0.96, 0.5), (0.86, 0.64), (0.64, 0.58), (0.56, 0.48)], W),
+        E((0.8, 0.44), (0.1, 0.12), c=[120, 0, 24]), E((0.82, 0.44), (0.05, 0.06), c=K),
+        P([(0.56, 0.3), (0.74, 0.16), (0.94, 0.24), (0.9, 0.3), (0.74, 0.24), (0.6, 0.36)], K),
+        L([(0.1, 0.8), (0.3, 0.9), (0.5, 0.86)], 0.02, [176, 160, 24]))
+# Toad's model
+for _f in (90, 91):
+    B[f"0/{_f}/b7"] = brief(
+        [250, 190, 150], R(0.6, 0, 1, 0.72, W), E((0.25, 0.28), (0.065, 0.14), c=K), E((0.24, 0.22), (0.025, 0.05), c=[60, 170, 170]),
+        E((0.08, 0.46), (0.08, 0.06), c=[250, 150, 150]), L([(0.08, 0.64), (0.26, 0.58)], 0.025, [150, 80, 50]),
+        R(0.6, 0.72, 0.8, 1, [0, 0, 236]), R(0.8, 0.72, 1, 1, [250, 190, 150]))
+    B[f"0/{_f}/b8"] = brief(W, E((0.25, 0.5), (0.1, 0.2), c=[240, 0, 0]), E((0.75, 0.5), (0.1, 0.2), c=[240, 0, 0]))
+    B[f"0/{_f}/b9"] = brief(W, E((0.5, 0.5), (0.24, 0.24), c=[255, 150, 150]), E((0.5, 0.5), (0.2, 0.2), c=[240, 0, 0]))
+# Bowser: head-and-shell strips
+BOW_O, BOW_G = [248, 132, 28], [8, 72, 40]
+for _f, _keys in ((92, ("b7",)), (93, ("b7", "b8", "b9")), (94, ("b7", "b8", "b9")), (95, ("b7", "b8", "b9"))):
+    for _k in _keys:
+        _eye = _k == "b7" and _f != 92
+        _ops = [R(0, 0.5, 1, 1, BOW_G), E((0.56, 0.74), (0.34, 0.17), c=[0, 124, 84]), E((0.56, 0.74), (0.2, 0.1), c=BOW_G),
+                R(0, 0.5, 0.14, 1, [140, 20, 10]), L([(0.02, 0.02), (0.14, 0.2), (0.3, 0.46)], 0.07, W),
+                L([(0.14, 0.0), (0.26, 0.2), (0.4, 0.44)], 0.03, K), L([(0.5, 0.22), (0.66, 0.3), (0.8, 0.26)], 0.02, [150, 60, 0])]
+        if _eye:
+            _ops = [R(0, 0.5, 1, 1, [70, 50, 70]), E((0.56, 0.74), (0.3, 0.15), c=[40, 30, 50]), R(0, 0.5, 0.14, 1, [140, 20, 10]),
+                    P([(0.1, 0.06), (0.9, 0.1), (0.96, 0.34), (0.5, 0.42), (0.12, 0.36)], W),
+                    E((0.7, 0.24), (0.14, 0.1), c=[120, 0, 24]), E((0.72, 0.24), (0.06, 0.045), c=K),
+                    P([(0.06, 0.02), (0.96, 0.06), (0.96, 0.14), (0.5, 0.1), (0.1, 0.12)], K)]
+        B[f"0/{_f}/{_k}"] = brief(BOW_O, *_ops)
+B["0/96/b7"] = brief(
+    BOW_O, *[E((0.62 + 0.12 * i, 0.16), (0.045, 0.07), c=W) for i in range(3)],
+    *[E((0.68 + 0.12 * i, 0.34), (0.045, 0.06), c=[255, 200, 150]) for i in range(2)], R(0.04, 0.3, 0.3, 0.33, K),
+    P([(0, 0.62), (0.5, 0.44), (1, 0.62), (1, 1), (0, 1)], W), P([(0.06, 0.68), (0.5, 0.52), (0.94, 0.68), (0.94, 1), (0.06, 1)], [0, 124, 84]),
+    L([(0.5, 0.52), (0.5, 1)], 0.02, BOW_G), L([(0.06, 0.84), (0.94, 0.84)], 0.02, BOW_G), L([(0.28, 0.6), (0.28, 1)], 0.02, BOW_G),
+    L([(0.72, 0.6), (0.72, 1)], 0.02, BOW_G))
+B["0/96/b8"] = brief(
+    SKIN, R(0, 0, 0.46, 0.3, RED), E((0.2, 0.15), (0.16, 0.11), c=W),
+    L([(0.1, 0.22), (0.14, 0.1), (0.2, 0.18), (0.26, 0.1), (0.3, 0.22)], 0.04, RED),
+    eye((0.7, 0.36), (0.14, 0.2), IRIS_B, look=(-0.2, 0.1), irisr=0.6, pupil=0.0, ring=IRIS_RING, border=0.08),
+    L([(0.52, 0.12), (0.7, 0.07), (0.88, 0.14)], 0.05), P([(0.4, 0.72), (0.7, 0.62), (0.98, 0.7), (0.9, 0.88), (0.6, 0.96), (0.42, 0.9)], K),
+    P([(0, 0.6), (0.3, 0.5), (0.36, 0.72), (0.1, 1), (0, 1)], HAIR))
+# Shy Guy, a star block, mushroom caps
+B["0/106/b7"] = brief(
+    [222, 22, 22], P([(0.45, 0.3), (1, 0.08), (1, 0.2), (0.5, 0.42)], [240, 200, 0]), L([(0.5, 0.6), (1, 0.5)], 0.03, [160, 0, 0]),
+    L([(0.55, 0.8), (1, 0.72)], 0.03, [160, 0, 0]), E((0.18, 0.46), (0.33, 0.44), c=W), E((0.2, 0.36), (0.1, 0.17), c=K))
+B["0/107/b7"] = brief([72, 72, 92], P(star_pts(0.5, 0.52, 0.5, 0.24), [200, 190, 0]), P(star_pts(0.5, 0.52, 0.42, 0.2), [236, 232, 40]),
+                      E((0.42, 0.4), (0.1, 0.06), c=GOLD_L, rot=-30))
+B["0/109/b10"] = brief([150, 20, 44], E((0.5, 0.55), (0.14, 0.3), c=[222, 222, 222]), E((0.05, 0.9), (0.1, 0.3), c=[222, 222, 222]),
+                       E((0.95, 0.9), (0.1, 0.3), c=[222, 222, 222]))
+B["0/109/b11"] = brief([120, 16, 36], E((0.5, 0.62), (0.2, 0.4), c=[222, 190, 130]), E((0.44, 0.5), (0.02, 0.07), c=K),
+                       E((0.56, 0.5), (0.02, 0.07), c=K), E((0.5, 0.2), (0.3, 0.26), c=[150, 20, 44]))
+
 # ------------------------------------------------------------------ render
 
 def paint(key, d):
     """Generator hook: RGBA uint8 for a briefed image, else None."""
+    if key not in T and key not in B:
+        return None
+    w, h = d["w"], d["h"]
+    if key in T:
+        text, top, bottom, edge, opt = T[key]
+        out = typeset(w, h, text, top, bottom, edge, **opt)
+        if d["mode"] == "rgba1":
+            out[..., 3] = np.where(out[..., 3] >= 96, 255, 0)
+        return np.clip(out, 0, 255).astype(np.uint8)
     b = B.get(key)
     if b is None:
         return None
-    w, h = d["w"], d["h"]
     alpha = G.unpack_alpha2(d["alpha2"], w, h) if "alpha2" in d else None
     out = facepaint.render(b, w, h, grid=d.get("grid"), alpha=alpha, seed=G.h32("brief", key))
     return np.clip(out, 0, 255).astype(np.uint8)
@@ -368,8 +584,8 @@ def main(argv):
     cell = int(argv[argv.index("--cell") + 1]) if "--cell" in argv else 128
     tex = json.load(open(os.path.join(SPEC, "textures.json")))
     keys = sorted((k for k in tex if k.split("/")[0] == sel.split("/")[0] and k.startswith(sel) or k.split("/")[0] == sel),
-                  key=lambda k: (int(k.split("/")[1]), k.split("/")[2][0], int(k.split("/")[2][1:] or 0)))
-    keys = [k for k in keys if k in B]
+                  key=lambda k: (int(k.split("/")[1]), k.split("/")[2][0], int(k.split("/")[2][1:]) if k.split("/")[2][1:].isdigit() else 0))
+    keys = [k for k in keys if k in B or k in T]
     cols = max(1, 1600 // (cell + 6))
     rows = (len(keys) + cols - 1) // cols
     sheet = Image.new("RGB", (cols * (cell + 6), max(1, rows) * (cell + 12)), (24, 24, 28))
@@ -384,7 +600,7 @@ def main(argv):
         dr.text((x + 1, y), k.split("/", 1)[1], fill=(255, 255, 0))
         sheet.paste(bg.convert("RGB").resize((int(im.width * s), int(im.height * s)), Image.NEAREST), (x, y + 11))
     sheet.save(out)
-    print(f"briefs: {out} {sheet.size}, {len(keys)} painted in dir {sel} ({len(B)} briefs in all)")
+    print(f"briefs: {out} {sheet.size}, {len(keys)} painted in dir {sel} ({len(B)} briefs, {len(T)} typeset in all)")
 
 
 if __name__ == "__main__":

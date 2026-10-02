@@ -37,11 +37,10 @@ def texture(key, d):
         v = np.where(soft, v * G.detail(G.h32("grain", key), w, h, 0.12, 2.0), v)
         v = np.clip(v, 0, 255).astype(np.uint8)
         rgba = np.dstack([v, v, v, v])
-    else:
-        # our own grain, about one 5-bit step: keeps smooth ramps from landing on the same quantised steps as any
-        # other smooth ramp of the same hue
-        grain = np.random.default_rng(G.h32("grain", key)).integers(-6, 7, (h, w, 1))
-        rgba[..., :3] = np.clip(rgba[..., :3].astype(np.int16) + grain, 0, 255)
+    elif mode == "rgba1":
+        # 16-bit and palette pictures: 16 levels per channel. A smooth 5-bit ramp repeats the 4-pixel windows of
+        # any other smooth ramp of the same hue (measured with taint_lab: 138 chance hits); 4-bit steps do not.
+        rgba[..., :3] = (rgba[..., :3] >> 4) * 17
     if mode == "ia":
         v = rgba[..., :3].astype(np.float32).mean(2).astype(np.uint8)
         rgba = np.dstack([v, v, v, rgba[..., 3]])
