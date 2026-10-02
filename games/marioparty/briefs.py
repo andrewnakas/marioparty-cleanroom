@@ -391,6 +391,39 @@ for _i, _ch in enumerate("abcdefghijklmnopq"):
     T[f"0/136/p{_i}"] = (_ch, *_ORANGE, {"th": 1.2})
 
 
+# words in dir 9: board names, title screen prompts
+for _f, _name in ((100, "PEACH'S BIRTHDAY CAKE"), (101, "YOSHI'S TROPICAL ISLAND"), (102, "WARIO'S BATTLE CANYON"),
+                  (103, "LUIGI'S ENGINE ROOM"), (104, "MARIO'S RAINBOW CASTLE"), (105, "BOWSER'S MAGMA MOUNTAIN"),
+                  (106, "ETERNAL STAR")):
+    T[f"9/{_f}/p0"] = (_name, *_ORANGE, {"th": 0.75, "align": "left"})
+T["9/107/p0"] = ("Played", [255, 244, 80], [240, 180, 0], [72, 20, 124], {"th": 1.3})
+T["9/108/p0"] = ("Stars", [255, 244, 80], [240, 180, 0], [72, 20, 124], {"th": 1.3})
+T["9/112/p0"] = ("NO CONTROLLER", [255, 120, 60], [220, 20, 10], [250, 240, 200], {"th": 1.2})
+T["9/113/p0"] = ("PRESS START", [255, 120, 60], [220, 20, 10], [250, 240, 200], {"th": 1.0})
+T["9/116/p0"] = ("TM", [255, 190, 40], [240, 130, 0], [10, 10, 10], {"th": 0.8, "pad": 0})
+
+
+def _logo(w, h, d, alpha):
+    """Title logo: our own lettering on a gold burst with a red band (the kept alpha gives the outer shape)."""
+    out = facepaint.render(brief(GOLD, R(0, 0.3, 1, 0.74, [226, 30, 24]), R(0, 0.3, 1, 0.34, [120, 0, 10]),
+                                 R(0, 0.7, 1, 0.74, [120, 0, 10]), E((0.5, 0.86), (0.09, 0.1), c=[40, 150, 240])),
+                           w, h, alpha=alpha)
+    cols = ["red", "yel", "grn", "blu", "pnk", "org", "sil", "grn", "yel", "blu", "mag"]
+    letters = "MARIO PARTY"
+    lw = int(w * 0.84 / len(letters))
+    x = int(w * 0.08)
+    for ch, col in zip(letters, cols):
+        if ch != " ":
+            top, bottom = _RAINBOW[col]
+            g = typeset(lw + 4, int(h * 0.46), ch, top, bottom, [20, 10, 40], th=2.0, pad=1)
+            y0 = int(h * 0.29)
+            a = g[..., 3:] / 255
+            reg = out[y0:y0 + g.shape[0], x - 2:x - 2 + g.shape[1]]
+            reg[..., :3] = reg[..., :3] * (1 - a[:reg.shape[0], :reg.shape[1]]) + g[:reg.shape[0], :reg.shape[1], :3] * a[:reg.shape[0], :reg.shape[1]]
+        x += lw
+    return out
+
+
 def typeset(w, h, text, top, bottom, edge, th=None, slant=0.0, align="centre", edge_px=1.0, pad=1):
     """RGBA float (h, w, 4): one line of stroke text with a vertical gradient fill and a dark edge."""
     ss = 4
@@ -658,6 +691,16 @@ for _who, _lo, _hi in (("mario", 0, 51), ("luigi", 52, 129), ("peach", 130, 266)
     for _f in range(_lo, _hi + 1):
         B[f"16/{_f}/p0"] = _PORTRAIT[_who]
 
+B["9/114/p0"] = _logo
+# direction signs and item icons (dir 21)
+_SIGN = [R(0, 0, 1, 1, [200, 160, 40]), R(0.06, 0.06, 0.94, 0.94, W)]
+B["21/0/p0"] = brief(W, *_SIGN, P([(0.5, 0.12), (0.86, 0.5), (0.64, 0.5), (0.64, 0.88), (0.36, 0.88), (0.36, 0.5), (0.14, 0.5)], [240, 10, 10]))
+B["21/0/p1"] = brief(W, *_SIGN, P([(0.14, 0.14), (0.66, 0.14), (0.5, 0.3), (0.86, 0.66), (0.66, 0.86), (0.3, 0.5), (0.14, 0.66)], [240, 10, 10]))
+B["21/0/p2"] = brief(W, *_SIGN, E((0.5, 0.74), (0.24, 0.17), c=[238, 228, 204]), E((0.5, 0.42), (0.38, 0.3), c=[0, 150, 44]),
+                     E((0.5, 0.26), (0.13, 0.08), c=[236, 240, 120]), E((0.22, 0.48), (0.08, 0.1), c=[236, 240, 120]),
+                     E((0.78, 0.48), (0.08, 0.1), c=[236, 240, 120]), E((0.44, 0.74), (0.025, 0.06), c=K), E((0.56, 0.74), (0.025, 0.06), c=K))
+B["21/0/p3"] = brief([0, 0, 250])
+
 # ------------------------------------------------------------------ render
 
 def paint(key, d):
@@ -678,6 +721,8 @@ def paint(key, d):
     if b is None:
         return None
     alpha = G.unpack_alpha2(d["alpha2"], w, h) if "alpha2" in d else None
+    if callable(b):
+        return np.clip(b(w, h, d, alpha), 0, 255).astype(np.uint8)
     out = facepaint.render(b, w, h, grid=d.get("grid"), alpha=alpha, seed=G.h32("brief", key))
     return np.clip(out, 0, 255).astype(np.uint8)
 
