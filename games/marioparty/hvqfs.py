@@ -14,7 +14,7 @@ import struct
 import numpy as np
 
 ROM_OFFSET = 0xFE2310
-ROM_END = 0x1539E40           # audio follows
+ROM_END = 0x15396A0           # audio (first S2 music bank) follows
 DECODE_ROM = 0x8014C          # func_8007F54C (RAM 0x8007F54C), 0x574 bytes up to the next function
 DECODE_RAM = 0x8007F54C
 DECODE_ROOM = 0x574

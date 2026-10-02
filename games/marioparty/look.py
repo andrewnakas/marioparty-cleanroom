@@ -43,7 +43,7 @@ def main(argv):
     out = f"{DEV}/shots/{os.path.splitext(name)[0]}"
     r = subprocess.run([sys.executable, "ports/ejs/cdp_shot.py", out, "--url",
                         f"http://localhost:{PORT}/index.html?rom={name}&hb=1", "--script", script, "--gpu", "--port", "9351"],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, env=dict(os.environ, CDP_MUTE="1"))    # never play out loud
     print((r.stdout + r.stderr).strip().splitlines()[-1])
     shots = sorted((f for f in os.listdir(out) if f.startswith("shot_")), key=lambda f: float(f[5:-4]))
     if not shots:

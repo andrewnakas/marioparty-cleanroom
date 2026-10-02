@@ -1,6 +1,6 @@
 """DIRTY ROOM: retail ROM -> spec (coarse facts only).
 
-    python -m games.marioparty.extract_spec <retail rom> [tex|hvq]
+    python -m games.marioparty.extract_spec <retail rom> [tex|hvq|snd]
 
 Textures (every image in MainFS): format/size, 4x4 colour grid (16x16 from 128 px), 2-bit alpha outline.
 For intensity images the outline is the 2-bit intensity (they are masks / glyphs: the value is the alpha).
@@ -12,7 +12,7 @@ import sys
 import numpy as np
 
 from cleanroom.decomp import spec as S
-from . import hvqfs, images, mainfs
+from . import audio, hvqfs, images, mainfs
 
 SPEC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "spec")
 
@@ -67,10 +67,34 @@ def pictures(rom):
     return {"bg": bg, "fs": fs}
 
 
+def samples(rom):
+    """Every wave: length, analysis rate, loop points, coarse spectral outline, median pitch."""
+    from cleanroom.audio import descriptor
+    from cleanroom.audio.pitch import median_f0
+    out = {}
+    for w in audio.waves(rom):
+        pcm = audio.decode(rom, w).astype(np.float64)
+        rate = w["rate"] or audio.SFX_RATE
+        d = {"n": len(pcm), "rate": rate, "desc": descriptor.describe(pcm, rate)}
+        f0 = median_f0((pcm[:rate] / 32768).astype(np.float32), rate) if len(pcm) > 2048 else None
+        if f0:
+            d["f0"] = round(f0, 1)
+        if w["loop"]:
+            d["loop"] = [w["loop"]["start"], w["loop"]["end"], w["loop"]["count"]]
+        out[w["name"]] = d
+    return out
+
+
 def main(argv):
     rom = open(argv[1], "rb").read()
     os.makedirs(SPEC, exist_ok=True)
     what = argv[2] if len(argv) > 2 else "tex"
+    if what == "snd":
+        smp = samples(rom)
+        json.dump(smp, open(os.path.join(SPEC, "samples.json"), "w"), separators=(",", ":"))
+        print(f"samples: {len(smp)} waves, {sum(d['n'] for d in smp.values()) / 1e6:.1f} M samples, "
+              f"{sum(1 for d in smp.values() if 'f0' in d)} pitched, {sum(1 for d in smp.values() if 'loop' in d)} looped")
+        return
     if what == "hvq":
         pic = pictures(rom)
         json.dump(pic, open(os.path.join(SPEC, "pictures.json"), "w"), separators=(",", ":"))

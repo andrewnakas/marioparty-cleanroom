@@ -11,6 +11,8 @@ from . import hvqfs, mainfs
 
 RETAIL_SHA1 = "1159bd56730094bfc71be30113e1cfc8bacf34f3"
 FREE_START = 0x1CED490      # 0xFF padding to the end of the 32 MB image
+STRINGS, STRINGS_END = 0xFCB860, 0xFE2310      # text bank (kept), between MainFS and the backgrounds
+STRINGS_SITE = (0x1AE6E, 0x1AE76)               # lui/addiu holding its address (PartyPlanner64)
 
 
 def set_addr(image, upper, lower, addr):
@@ -44,15 +46,23 @@ class Builder:
         data = mainfs.pack(dirs)
         span = mainfs.ROM_END - mainfs.ROM_OFFSET
         self.image[mainfs.ROM_OFFSET:mainfs.ROM_END] = bytes(span)
-        if len(data) <= span and not force_move:
-            pos = mainfs.ROM_OFFSET
-        else:
+        pos, note = mainfs.ROM_OFFSET, ""
+        if len(data) > span and not force_move and len(data) <= STRINGS_END - mainfs.ROM_OFFSET:
+            # a little too big: move the text bank (one address site) into the free tail and use its room
+            text = bytes(self.image[STRINGS:STRINGS_END])
+            self.image[STRINGS:STRINGS_END] = bytes(len(text))
+            tpos = self.alloc(len(text))
+            self.image[tpos:tpos + len(text)] = text
+            assert get_addr(self.image, *STRINGS_SITE) == STRINGS
+            set_addr(self.image, *STRINGS_SITE, tpos)
+            note = f", text bank moved to {tpos:#x}"
+        elif len(data) > span or force_move:
             pos = self.alloc(len(data))
             for up, lo in mainfs.PATCH_SITES:
                 assert get_addr(self.image, up, lo) == mainfs.ROM_OFFSET
                 set_addr(self.image, up, lo, pos)
         self.image[pos:pos + len(data)] = data
-        self.log.append(f"mainfs {len(data) >> 10} KB at {pos:#x} (retail span {span >> 10} KB)")
+        self.log.append(f"mainfs {len(data) >> 10} KB at {pos:#x} (retail span {span >> 10} KB){note}")
 
     def put_hvqfs(self, dirs):
         """Backgrounds: table in place; picture dirs in the retail span while they fit, the rest after the data."""

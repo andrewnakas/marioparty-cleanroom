@@ -2,7 +2,7 @@
 
     python -m games.marioparty.generate <retail rom> <out.z64>
 
-The retail image supplies the program and the container layouts (kept facts); every pixel payload and palette
+The retail image supplies the program and the container layouts (kept facts); every pixel payload, palette and sound sample
 is overwritten with data made from `spec/` only. `taint.py` proves it.
 """
 import hashlib
@@ -12,8 +12,9 @@ import sys
 
 import numpy as np
 
+from cleanroom.audio import descriptor
 from cleanroom.decomp import gen as G
-from . import hvqfs, images, mainfs, romtool
+from . import audio, hvqfs, images, mainfs, romtool
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SPEC = os.path.join(HERE, "spec")
@@ -87,6 +88,44 @@ def still(key, d):
     return _smooth(g, d["w"], d["h"])
 
 
+def sample(name, d):
+    """One wave (int16, d["n"] samples) resynthesised from its outline.
+
+    Pitched sounds get one steady pitch (the spec's median f0). For a looped tone the pitch is snapped so the
+    loop holds a whole number of periods: that is what the engine plays, and it keeps instruments in tune."""
+    n, rate = d["n"], d["rate"]
+    frames = [dict(f) for f in d["desc"]["frames"]]
+    tonal = [f for f in frames if f["f0"] > 20 and f["h"] > 0.3]
+    loop = d.get("loop")
+    f0 = d.get("f0") or (float(np.median([f["f0"] for f in tonal])) if len(tonal) * 2 > len(frames) else None)
+    if f0 and tonal:
+        if loop and loop[1] > loop[0]:
+            length = loop[1] - loop[0]
+            snapped = max(1, round(length * f0 / rate)) * rate / length
+            if length < 4096 or abs(np.log2(snapped / f0)) < 0.04:
+                f0 = snapped
+        for f in tonal:
+            f["f0"] = f0
+    x = descriptor.synthesize({"frames": frames}, n, rate, seed=G.h32("smp", name))
+    if loop and 0 <= loop[0] < loop[1] <= n:
+        x = descriptor.make_loop_seamless(x, loop[0], loop[1])
+    dither = np.random.default_rng(G.h32("dither", name)).integers(-1, 2, n)
+    return np.clip(np.round(np.clip(x, -1, 1) * 32000) + dither, -32768, 32767).astype(np.int16)
+
+
+def put_samples(b, retail, hooks=()):
+    smp = json.load(open(os.path.join(SPEC, "samples.json")))
+    for w in audio.waves(retail):
+        d, pcm = smp[w["name"]], None
+        for hook in hooks:
+            pcm = hook("snd/" + w["name"], d)
+            if pcm is not None:
+                break
+        audio.put(b.image, w, sample(w["name"], d) if pcm is None else pcm)
+    b.log.append(f"samples {len(smp)}")
+    return len(smp)
+
+
 def _selected(d, f, kind):
     """Dev bisecting: MP_KINDS=pack,form  MP_DIRS=0-9,16  MP_SKIP=10/61,0/118 (default: everything)."""
     kinds, dirs, skip = os.environ.get("MP_KINDS"), os.environ.get("MP_DIRS"), os.environ.get("MP_SKIP", "")
@@ -105,12 +144,13 @@ def _selected(d, f, kind):
 
 def build(retail, hooks=()):
     tex = json.load(open(os.path.join(SPEC, "textures.json")))
-    pic = json.load(open(os.path.join(SPEC, "pictures.json")))
+    have_pic = os.path.exists(os.path.join(SPEC, "pictures.json"))      # absent only in dev builds
+    pic = json.load(open(os.path.join(SPEC, "pictures.json"))) if have_pic else {"bg": [], "fs": {}}
     dirs = mainfs.read(retail)
     n = 0
     for d, files in enumerate(dirs):
         for f, e in enumerate(files):
-            if e["raw"][:4] == b"HVQ ":
+            if e["raw"][:4] == b"HVQ " and have_pic:
                 key, out = f"{d}/{f}", None
                 for hook in hooks:
                     out = hook("still/" + key, pic["fs"][key])
@@ -139,12 +179,16 @@ def build(retail, hooks=()):
             e["comp"] = None
     b = romtool.Builder(retail)
     b.put_mainfs(dirs)
-    bgs = hvqfs.read(retail)
-    for k, d in enumerate(pic["bg"]):
-        bgs[k][1:] = background_tiles(k, d, hooks)
-        n += d["tiles"]
-    b.put_hvqfs(bgs)
-    b.put_decoder()
+    if have_pic:
+        bgs = hvqfs.read(retail)
+        for k, d in enumerate(pic["bg"]):
+            bgs[k][1:] = background_tiles(k, d, hooks)
+            n += d["tiles"]
+        b.put_hvqfs(bgs)
+        b.put_decoder()
+    else:
+        b.log.append("DEV BUILD: retail backgrounds (no pictures.json)")
+    n += put_samples(b, retail, hooks)
     return b, n
 
 
@@ -154,7 +198,7 @@ def main(argv):
     b, n = build(retail)
     out = b.finish()
     open(argv[2], "wb").write(out)
-    print(f"generate: {n} pictures regenerated; " + "; ".join(b.log))
+    print(f"generate: {n} pictures and sounds regenerated; " + "; ".join(b.log))
     print(f"rom: {argv[2]} {len(out) >> 20} MB sha1 {hashlib.sha1(out).hexdigest()[:12]}")
 
 

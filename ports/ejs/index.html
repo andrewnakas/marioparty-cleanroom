@@ -92,9 +92,30 @@
       });
       for (const s of times) chain = chain.then(() => shot(s));
     }
-    if (q.get("hb")) setInterval(() => log(`MPHB ${((performance.now() - t0) / 1000).toFixed(0)}s`), 5000);
+    if (q.get("hb")) setInterval(() => {
+      // dev heartbeat: time + output level of the last ~0.1 s (0 = silence), to check sound headlessly
+      let rms = "";
+      if (window.__mpTap) {
+        const a = new Float32Array(window.__mpTap.fftSize);
+        window.__mpTap.getFloatTimeDomainData(a);
+        rms = " rms=" + Math.sqrt(a.reduce((s, v) => s + v * v, 0) / a.length).toFixed(4);
+      }
+      log(`MPHB ${((performance.now() - t0) / 1000).toFixed(0)}s${rms}`);
+    }, 2500);
   };
 })();
+</script>
+<script>
+if (new URLSearchParams(location.search).get("hb")) {
+  const connect = AudioNode.prototype.connect;
+  AudioNode.prototype.connect = function (dest, ...rest) {
+    if (dest === this.context.destination) {
+      if (!window.__mpTap) { window.__mpTap = this.context.createAnalyser(); window.__mpTap.fftSize = 4096; }
+      connect.call(this, window.__mpTap);
+    }
+    return connect.call(this, dest, ...rest);
+  };
+}
 </script>
 <script src="data/loader.js"></script>
 </body>
