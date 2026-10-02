@@ -1,22 +1,22 @@
 # Taint report
 
-clean ROM sha1 `59d5cd787d867f909ff89dbe016a684fd246cbb1` (32 MB) vs the retail USA ROM.
+clean ROM sha1 `7ab590d6dcd3852731a338f3b7eef34b9bc98218` (32 MB) vs the retail USA ROM.
 Window 16 B, failing run >= 32 B.
 
 | scan | retail windows indexed | clean streams with coincidences | longest shared run | failing |
 |---|---|---|---|---|
-| textures | 7711428 | 736 | 28 B | 0 |
+| textures | 7711428 | 717 | 28 B | 0 |
 | pictures | 26974664 | 158 | 31 B | 0 |
-| samples | 26626720 | 45 | 25 B | 0 |
+| samples | 26626720 | 46 | 25 B | 0 |
 | raw image | 15234363 | 2 | 27 B | 0 |
 
 | region | bytes | differing |
 |---|---|---|
 | header checksum | 8 | 8 |
 | picture decoder (ours, over the HVQ2 decoder) + entry jump | 13300 | 1169 |
-| MainFS | 13299840 | 11793201 |
+| MainFS | 13299840 | 11790103 |
 | backgrounds | 5600144 | 5003749 |
-| audio (samples, codebooks, loop states) | 8076784 | 7417512 |
+| audio (samples, codebooks, loop states) | 8076784 | 7408016 |
 | tail (free in retail) | 3222384 | 0 |
 
 - bytes differing outside those regions: **0**

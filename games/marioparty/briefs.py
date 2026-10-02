@@ -424,6 +424,16 @@ def _logo(w, h, d, alpha):
     return out
 
 
+# word strips of the board UI (dir 10)
+T["10/17/p0"] = ("YOU ARE THE", W, [190, 200, 215], [40, 50, 80], {"th": 1.6})
+T["10/18/p0"] = ("SUPERSTAR!", [255, 244, 80], [240, 150, 0], [90, 30, 0], {"th": 2.4, "pad": 2})
+for _f, _name, _col in ((23, "MARIO", "red"), (24, "LUIGI", "grn"), (25, "PEACH", "pnk"), (26, "YOSHI", "grn"),
+                        (27, "WARIO", "vio"), (28, "DK", "yel")):
+    T[f"10/{_f}/p0"] = (_name + " START", *_RAINBOW[_col], [20, 20, 40], {"th": 2.0, "pad": 2})
+T["10/29/p0"] = ("GAME OVER", *_RAINBOW["blu"], [20, 20, 40], {"th": 2.0, "pad": 2})
+T["10/38/p0"] = ("BOWSER EVENT", *_RAINBOW["grn"], [60, 0, 20], {"th": 2.2, "pad": 3})
+
+
 def typeset(w, h, text, top, bottom, edge, th=None, slant=0.0, align="centre", edge_px=1.0, pad=1):
     """RGBA float (h, w, 4): one line of stroke text with a vertical gradient fill and a dark edge."""
     ss = 4
@@ -814,6 +824,10 @@ for _f, _cap in ((12, [232, 30, 24]), (13, [130, 50, 190])):
 for _i in range(8):
     B[f"10/20/p{_i}"] = brief(GOLD, E((0.5, 0.56), (0.2, 0.2), c=GOLD_L), E((0.5, 0.58), (0.17, 0.17), c=GOLD),
                               *([E((x, 0.5), (0.032, 0.085), c=K) for x in (0.42, 0.58)] if _i == 0 else []), {"outline": 1, "c": GOLD_D})
+
+B["10/30/p0"] = over(brief([250, 236, 220]), "GAME START", [255, 120, 60], [220, 20, 10], [250, 240, 200], (0.02, 0.79, 0.98, 0.97), th=1.5)
+B["10/34/p0"] = over(brief([20, 170, 60], {"outline": 2, "c": [0, 80, 20]}), "NO GAME", [150, 220, 255], [30, 100, 240], [10, 20, 90],
+                     (0.04, 0.2, 0.96, 0.8), th=3.0, pad=3)
 
 # ------------------------------------------------------------------ render
 
