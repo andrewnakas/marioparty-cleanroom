@@ -22,7 +22,7 @@ python ports/ejs/make_site.py $ROM $W/devsite $SITE
 [ "$1" = push ] || exit 0
 cd $SITE
 [ -d .git ] || { git init -q && git remote add origin https://github.com/andrewnakas/marioparty-cleanroom.git; }
-git config user.name andre && git config user.email treesixtyweather@gmail.com
+git config user.name andre && git config user.email treesixtyweather@gmail.com && git config http.postBuffer 157286400
 # one orphan commit per deploy: the Pages builder chokes on a long history of 32 MB ROMs
 git checkout -q --orphan tmp && git add -A && git commit -qm "Site: ${2:-rebuild}" \
     && { git branch -D gh-pages -q 2>/dev/null || true; } && git branch -m gh-pages \
