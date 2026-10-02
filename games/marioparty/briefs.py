@@ -367,6 +367,30 @@ T["0/118/p6"] = ("START!", [255, 240, 80], [250, 150, 20], [120, 20, 10], {"th":
 T["0/118/p7"] = ("FINISH!", [255, 240, 80], [250, 150, 20], [120, 20, 10], {"th": 1.6})
 
 
+# menu fonts in dir 0: a rainbow alphabet, and orange letters / digits / punctuation with a purple edge
+_RAINBOW = {"red": ([255, 90, 40], [200, 10, 10]), "yel": ([255, 244, 80], [230, 170, 0]), "grn": ([120, 240, 60], [0, 150, 20]),
+            "blu": ([80, 170, 255], [10, 60, 220]), "pnk": ([255, 150, 200], [240, 60, 150]), "mag": ([250, 120, 250], [190, 30, 200]),
+            "sil": ([240, 240, 250], [130, 130, 160]), "org": ([255, 180, 40], [240, 90, 0]), "vio": ([220, 150, 255], [130, 60, 220])}
+_ABC = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+for _i, (_ch, _col) in enumerate(zip(_ABC, "red yel grn blu pnk mag sil org yel grn blu yel grn blu org yel grn blu grn pnk sil grn yel grn blu vio".split())):
+    T[f"0/121/p{_i}"] = (_ch, *_RAINBOW[_col], [10, 10, 20], {"th": 1.5})
+_ORANGE = ([255, 206, 20], [244, 110, 0], [72, 20, 124])
+for _i, _ch in enumerate(_ABC):
+    T[f"0/123/p{_i}"] = (_ch, *_ORANGE, {"th": 1.3})
+    T[f"0/125/p{_i}"] = (_ch, *_ORANGE, {"th": 2.0, "pad": 2})
+for _i in range(10):
+    T[f"0/124/p{_i}"] = ("O" if _i == 0 else str(_i), *_ORANGE, {"th": 1.3})
+    T[f"0/126/p{_i}"] = ("O" if _i == 0 else str(_i), *_ORANGE, {"th": 2.0, "pad": 2})
+    T[f"0/135/p{_i}"] = ("O" if _i == 0 else str(_i), *_ORANGE, {"th": 0.85})
+for _i, _ch in ((1, "!"), (2, "-"), (3, "?"), (4, "-"), (5, "'")):
+    T[f"0/127/p{_i}"] = (_ch, *_ORANGE, {"th": 1.3})
+    T[f"0/128/p{_i}"] = (_ch, *_ORANGE, {"th": 2.0, "pad": 2})
+T["0/135/p10"] = ("'", *_ORANGE, {"th": 0.85})
+T["0/135/p11"] = ('"', *_ORANGE, {"th": 0.85})
+for _i, _ch in enumerate("abcdefghijklmnopq"):
+    T[f"0/136/p{_i}"] = (_ch, *_ORANGE, {"th": 1.2})
+
+
 def typeset(w, h, text, top, bottom, edge, th=None, slant=0.0, align="centre", edge_px=1.0, pad=1):
     """RGBA float (h, w, 4): one line of stroke text with a vertical gradient fill and a dark edge."""
     ss = 4
@@ -567,7 +591,10 @@ def paint(key, d):
     if key in T:
         text, top, bottom, edge, opt = T[key]
         out = typeset(w, h, text, top, bottom, edge, **opt)
-        if d["mode"] == "rgba1":
+        if "alpha2" not in d:                     # opaque picture: our text on black
+            out[..., :3] *= out[..., 3:] / 255
+            out[..., 3] = 255
+        elif d["mode"] == "rgba1":
             out[..., 3] = np.where(out[..., 3] >= 96, 255, 0)
         return np.clip(out, 0, 255).astype(np.uint8)
     b = B.get(key)
