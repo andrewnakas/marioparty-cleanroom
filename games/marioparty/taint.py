@@ -8,7 +8,8 @@ Four content scans (cleanroom.taint: 16-byte windows, runs >= FAIL_RUN bytes fai
              decoder in the dirty room; clean: our CRQ pictures decoded)
   samples    every wave: decoded PCM and the stored sample bytes
   raw        the clean image from the first asset byte to the end, against the retail *stored* bytes of every
-             image file, picture tile and sample (proves no retail payload is still lying in the image)
+             image file, picture tile and sample (proves no retail payload is still lying in the image); the
+             compressed layout tables of the image packs (kept structure) are blanked first
 and a map of where the two images differ, which must stay inside the regenerated regions.
 Kept facts are listed, not scanned.
 """
@@ -66,6 +67,35 @@ def _scan(name, retail_streams, clean_streams, out):
 def _chunks(buf, start, size=1 << 21):
     for o in range(start, len(buf), size):
         yield f"rom@{o:#x}", bytes(buf[o:o + size + taint.WINDOW - 1])
+
+
+def _without_pack_tables(clean):
+    """Copy of the clean image with the compressed header + entry table + tile map of every ImgPack blanked.
+
+    Those sections are container layout (kept). Compressed, two packs with the same layout give the same LZ tokens,
+    which would show up as a shared run although no pixel is involved."""
+    import struct
+    out = bytearray(clean)
+    u32 = lambda o: struct.unpack_from(">I", clean, o)[0]
+    base = mainfs.ROM_OFFSET
+    n = 0
+    for d in range(u32(base)):
+        doff = base + u32(base + 4 + 4 * d)
+        for f in range(u32(doff)):
+            foff = doff + u32(doff + 4 + 4 * f)
+            size, kind = u32(foff), u32(foff + 4)
+            if kind != 1 or size < 0x2C:
+                continue
+            head, _ = mainfs.decompress(1, clean, foff + 8, 0x20)
+            if struct.unpack_from(">I", head, 0)[0] not in (0x20, 0x1B):
+                continue
+            images_off = struct.unpack_from(">I", head, 8)[0]
+            if not 0x20 <= images_off <= size:
+                continue
+            _, used = mainfs.decompress(1, clean, foff + 8, images_off)
+            out[foff + 8:foff + 8 + used] = bytes(used)
+            n += 1
+    return bytes(out), n
 
 
 def diff_map(retail, clean, regions):
@@ -134,7 +164,8 @@ def main(argv):
         for w in rw:
             yield w["name"], bytes(retail[w["pos"]:w["pos"] + w["len"]])
 
-    bad += _scan("raw image", stored(), _chunks(clean, ASSETS_START), results)
+    masked, npacks = _without_pack_tables(clean)
+    bad += _scan("raw image", stored(), _chunks(masked, ASSETS_START), results)
 
     # where the images differ
     regions = [("header checksum", 0x10, 0x18),

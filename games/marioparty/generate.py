@@ -21,6 +21,11 @@ SPEC = os.path.join(HERE, "spec")
 LEVELS = np.array([0, 85, 170, 255], np.float32)
 
 
+# Pictures whose default rendering still repeated a retail window run by chance (taint report feedback: one bit per
+# picture, no retail content): rendered with 8 levels per channel instead of 16.
+COARSE = {"8/14/p0", "31/15/p1"}
+
+
 def _blur(a):
     p = np.pad(a.astype(np.float32), 1, mode="edge")
     return (p[:-2, 1:-1] + p[2:, 1:-1] + p[1:-1, :-2] + p[1:-1, 2:] + 4 * p[1:-1, 1:-1]) / 8
@@ -37,6 +42,8 @@ def texture(key, d):
         v = np.where(soft, v * G.detail(G.h32("grain", key), w, h, 0.12, 2.0), v)
         v = np.clip(v, 0, 255).astype(np.uint8)
         rgba = np.dstack([v, v, v, v])
+    elif mode == "rgba1" and key in COARSE:
+        rgba[..., :3] = (rgba[..., :3] >> 5) * 36                    # 8 levels: see COARSE
     elif mode == "rgba1":
         # 16-bit and palette pictures: 16 levels per channel. A smooth 5-bit ramp repeats the 4-pixel windows of
         # any other smooth ramp of the same hue (measured with taint_lab: 138 chance hits); 4-bit steps do not.
@@ -205,6 +212,9 @@ def build(retail, hooks=()):
                     out = hook(key, tex[key])
                     if out is not None:
                         break
+                if out is not None and tex[key]["mode"] == "rgba1":
+                    out = out.copy()
+                    out[..., :3] = (out[..., :3] >> 4) * 17          # same 16 levels as the default rendering
                 new[im.key] = texture(key, tex[key]) if out is None else out
                 n += 1
             e["raw"] = images.rebuild(e["raw"], new)
