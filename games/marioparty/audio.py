@@ -2,8 +2,8 @@
 
 S2 (PartyPlanner64 docs): u16 'S2', u16 nseq, {u32 offset, u32 size}[nseq], then per sequence 16 bytes
 {u8 bank index, 0x7f, 0xff, 0xff, u32 B1 offset, u32 B1 size, u32 tbl offset}; B1 is a libultra ALBankFile.
-T3: u16 'T3', u16 nfx, 8 bytes per effect, a 0x2c-byte header (tbl offset at +0xc, tbl size at +0x14, sound count
-at +4), then 16-byte sounds {u32 env, u32 rate, u32 wavetable, pan, volume, flags} with offsets from that table.
+T3: u16 'T3', u16 nfx, 8 bytes per effect, a 0x2c-byte header (sound count at +4, then offset/size pairs: ctl +8/+0xc,
+tbl +0x10/+0x14, two more sections), then 16-byte sounds {u32 env, u32 rate, u32 wavetable, pan, volume, flags} with offsets from that table.
 
 `waves(rom)` lists every wavetable once: where its sample bytes, codebook and loop live in the ROM image.
 Sequences, envelopes, key maps, loop points and the effect tables are structure (kept); only sample bytes,
@@ -61,7 +61,7 @@ def waves(rom):
     for ti, t3 in enumerate(T3_OFFSETS):
         assert rom[t3:t3 + 2] == b"T3"
         hdr = t3 + 4 + struct.unpack_from(">H", rom, t3 + 2)[0] * 8
-        ctl, tbl = hdr + 0x2c, t3 + _u32(rom, hdr + 0xc)
+        ctl, tbl = hdr + 0x2c, t3 + _u32(rom, hdr + 0x10)
         for k in range(_u32(rom, hdr + 4)):
             rate, off = _u32(rom, ctl + k * 16 + 4), _u32(rom, ctl + k * 16 + 8)
             if (ctl, off) not in seen:

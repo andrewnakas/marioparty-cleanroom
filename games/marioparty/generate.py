@@ -121,7 +121,12 @@ def sample(name, d):
 
 def put_samples(b, retail, hooks=()):
     smp = json.load(open(os.path.join(SPEC, "samples.json")))
+    only = os.environ.get("MP_SND")      # dev bisecting: MP_SND=s2_0,t3 regenerates only those groups
     for w in audio.waves(retail):
+        if only and not w["name"].startswith(tuple(only.split(","))):
+            continue
+        if _off("raw") and w["type"] != 0:
+            continue
         d, pcm = smp[w["name"]], None
         for hook in hooks:
             pcm = hook("snd/" + w["name"], d)
@@ -130,6 +135,11 @@ def put_samples(b, retail, hooks=()):
         audio.put(b.image, w, sample(w["name"], d) if pcm is None else pcm)
     b.log.append(f"samples {len(smp)}")
     return len(smp)
+
+
+def _off(what):
+    """Dev bisecting: MP_OFF=glyph,pack1b,raw32,still,bg,snd leaves those parts retail (never for a release)."""
+    return what in os.environ.get("MP_OFF", "").split(",")
 
 
 def _selected(d, f, kind):
@@ -156,7 +166,7 @@ def build(retail, hooks=()):
     n = 0
     for d, files in enumerate(dirs):
         for f, e in enumerate(files):
-            if e["raw"][:4] == b"HVQ " and have_pic:
+            if e["raw"][:4] == b"HVQ " and have_pic and not _off("still"):
                 key, out = f"{d}/{f}", None
                 for hook in hooks:
                     out = hook("still/" + key, pic["fs"][key])
@@ -166,13 +176,15 @@ def build(retail, hooks=()):
                 e["comp"] = None
                 n += 1
                 continue
-            if (d, f) in images.GLYPH4:
+            if (d, f) in images.GLYPH4 and not _off("glyph"):
                 g = tex[f"{d}/{f}/glyphs"]
                 lv = (G.unpack_alpha2(g["alpha2"], g["w"], 1) / 85).astype(np.uint8).ravel()
                 e["raw"], e["comp"] = images.glyph_rebuild(e["raw"], images.GLYPH4[(d, f)], lv), None
                 n += 1
                 continue
             if not _selected(d, f, images.kind(e["raw"])):
+                continue
+            if (_off("pack1b") and e["raw"][:4] == bytes([0, 0, 0, 0x1B])) or (_off("raw32") and images.kind(e["raw"]) == "raw32"):
                 continue
             ims = images.find(e["raw"])
             if not ims:
@@ -191,16 +203,19 @@ def build(retail, hooks=()):
             e["comp"] = None
     b = romtool.Builder(retail)
     b.put_mainfs(dirs)
-    if have_pic:
+    if have_pic and not _off("bg"):
         bgs = hvqfs.read(retail)
         for k, d in enumerate(pic["bg"]):
             bgs[k][1:] = background_tiles(k, d, hooks)
             n += d["tiles"]
         b.put_hvqfs(bgs)
-        b.put_decoder()
     else:
-        b.log.append("DEV BUILD: retail backgrounds (no pictures.json)")
-    n += put_samples(b, retail, hooks)
+        b.image[hvqfs.ROM_OFFSET:hvqfs.ROM_END] = retail[hvqfs.ROM_OFFSET:hvqfs.ROM_END]
+    b.put_decoder()
+    if not _off("snd"):
+        n += put_samples(b, retail, hooks)
+    if os.environ.get("MP_OFF"):
+        b.log.append("DEV BUILD, retail parts: " + os.environ["MP_OFF"])
     return b, n
 
 
