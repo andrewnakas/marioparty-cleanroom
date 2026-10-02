@@ -60,24 +60,34 @@ def read(rom, base=ROM_OFFSET):
     return dirs
 
 
-def pack(dirs):
-    """Serialise; files carry 'kind' and either 'comp' (kept as is) or only 'raw' (compressed here)."""
-    out = bytearray(4 + 4 * len(dirs))
-    struct.pack_into(">I", out, 0, len(dirs))
-    for d, files in enumerate(dirs):
-        struct.pack_into(">I", out, 4 + 4 * d, len(out))
-        dstart = len(out)
-        out += bytes(4 + 4 * len(files))
-        struct.pack_into(">I", out, dstart, len(files))
-        for f, e in enumerate(files):
-            struct.pack_into(">I", out, dstart + 4 + 4 * f, len(out) - dstart)
-            comp = e.get("comp")
-            if comp is None:
-                comp = compress(e["kind"], e["raw"])
-            out += struct.pack(">II", len(e["raw"]), e["kind"]) + comp
-            if len(out) & 1:
-                out += b"\0"
+def pack_dir(files):
+    """One directory blob; files carry 'kind' and either 'comp' (kept as is) or only 'raw' (compressed here)."""
+    out = bytearray(4 + 4 * len(files))
+    struct.pack_into(">I", out, 0, len(files))
+    for f, e in enumerate(files):
+        struct.pack_into(">I", out, 4 + 4 * f, len(out))
+        comp = e.get("comp")
+        if comp is None:
+            comp = compress(e["kind"], e["raw"])
+        out += struct.pack(">II", len(e["raw"]), e["kind"]) + comp
+        if len(out) & 1:
+            out += b"\0"
     return bytes(out)
+
+
+def table(offsets):
+    """Directory table; offsets are relative to the start of the table (directories may live anywhere after it)."""
+    return struct.pack(">I", len(offsets)) + b"".join(struct.pack(">I", o) for o in offsets)
+
+
+def pack(dirs):
+    """Contiguous image (retail layout)."""
+    blobs = [pack_dir(files) for files in dirs]
+    pos, offs = 4 + 4 * len(dirs), []
+    for b in blobs:
+        offs.append(pos)
+        pos += len(b)
+    return table(offs) + b"".join(blobs)
 
 
 def main(argv):

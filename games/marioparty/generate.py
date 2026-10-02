@@ -41,51 +41,57 @@ def texture(key, d):
     return np.ascontiguousarray(rgba)
 
 
-def _smooth(grid, w, h):
-    """Colour grid (gh, gw, 3) -> RGBA (h, w, 4): bilinear upsample, then a small blur to hide the lattice."""
+CELL = 3      # backgrounds: lattice point every 8 px (the kept grid is one colour per 16x12 px)
+
+
+def _lattice(grid, w, h, k):
+    """Colour grid (gh, gw, 3) for a w x h picture -> RGB lattice ((h >> k) + 1, (w >> k) + 1, 3): the grid
+    smoothly interpolated at every (1 << k)-th pixel corner. The decoder interpolates between lattice points."""
     gh, gw = grid.shape[:2]
-    ys = np.clip((np.arange(h) + 0.5) / h * gh - 0.5, 0, gh - 1)
-    xs = np.clip((np.arange(w) + 0.5) / w * gw - 0.5, 0, gw - 1)
-    y0, x0 = np.floor(ys).astype(int), np.floor(xs).astype(int)
+    ys = np.clip(np.arange((h >> k) + 1) * (1 << k) / h * gh - 0.5, 0, gh - 1)
+    xs = np.clip(np.arange((w >> k) + 1) * (1 << k) / w * gw - 0.5, 0, gw - 1)
+    y0, x0 = np.minimum(np.floor(ys).astype(int), gh - 1), np.minimum(np.floor(xs).astype(int), gw - 1)
     y1, x1 = np.minimum(y0 + 1, gh - 1), np.minimum(x0 + 1, gw - 1)
     fy, fx = (ys - y0)[:, None, None], (xs - x0)[None, :, None]
     fy, fx = fy * fy * (3 - 2 * fy), fx * fx * (3 - 2 * fx)
     g = grid.astype(np.float32)
     im = (g[y0][:, x0] * (1 - fx) + g[y0][:, x1] * fx) * (1 - fy) + (g[y1][:, x0] * (1 - fx) + g[y1][:, x1] * fx) * fy
-    return np.dstack([np.clip(im, 0, 255), np.full((h, w), 255, np.float32)]).astype(np.uint8)
+    return np.clip(np.round(im), 0, 255).astype(np.uint8)
 
 
-def background(b, d):
-    """One pre-rendered background -> RGBA (ny*th, nx*tw, 4), top row first (None if it is not a full mosaic)."""
-    tw, th, nx, ny, n = d["tw"], d["th"], d["nx"], d["ny"], d["tiles"]
-    g = np.frombuffer(bytes.fromhex(d["grid"]), np.uint8).reshape(n, 4, 4, 3)
-    if n != nx * ny:
-        return None
-    # tiles are stored bottom row first
-    mosaic = g.reshape(ny, nx, 4, 4, 3)[::-1].transpose(0, 2, 1, 3, 4).reshape(ny * 4, nx * 4, 3)
-    return _smooth(mosaic, nx * tw, ny * th)
+def _picture(im):
+    """Hook output (RGBA, full resolution) -> CRQ1 file."""
+    return hvqfs.crq(hvqfs.rgba5551(im))
 
 
 def background_tiles(b, d, hooks=()):
-    """-> list of CRQ1 files in container order."""
+    """One pre-rendered background -> its tile files in container order (rows bottom to top).
+
+    Default: the kept grid as one smooth picture across the whole mosaic. A hook may return a full RGBA picture
+    (ny*th, nx*tw, 4), top row first."""
     tw, th, nx, ny, n = d["tw"], d["th"], d["nx"], d["ny"], d["tiles"]
-    im = None
+    g = np.frombuffer(bytes.fromhex(d["grid"]), np.uint8).reshape(n, 4, 4, 3)
     for hook in hooks:
         im = hook(f"bg/{b}", d)
         if im is not None:
-            break
-    if im is None:
-        im = background(b, d)
-    if im is None:
-        g = np.frombuffer(bytes.fromhex(d["grid"]), np.uint8).reshape(n, 4, 4, 3)
-        return [hvqfs.crq(hvqfs.rgba5551(_smooth(t, tw, th))) for t in g]
-    px = hvqfs.rgba5551(im)
-    return [hvqfs.crq(px[(ny - 1 - k // nx) * th:(ny - k // nx) * th, (k % nx) * tw:(k % nx + 1) * tw]) for k in range(n)]
+            return [_picture(im[(ny - 1 - k // nx) * th:(ny - k // nx) * th, (k % nx) * tw:(k % nx + 1) * tw])
+                    for k in range(n)]
+    if n != nx * ny:
+        return [hvqfs.crq_smooth(_lattice(t, tw, th, CELL), tw, th, CELL) for t in g]
+    mosaic = g.reshape(ny, nx, 4, 4, 3)[::-1].transpose(0, 2, 1, 3, 4).reshape(ny * 4, nx * 4, 3)
+    lat = _lattice(mosaic, nx * tw, ny * th, CELL)
+    sx, sy = tw >> CELL, th >> CELL
+    out = []
+    for k in range(n):
+        r, c = ny - 1 - k // nx, k % nx
+        out.append(hvqfs.crq_smooth(lat[r * sy:(r + 1) * sy + 1, c * sx:(c + 1) * sx + 1], tw, th, CELL))
+    return out
 
 
 def still(key, d):
+    """160x128 stills: 16x16 kept grid, lattice every 4 px."""
     g = np.frombuffer(bytes.fromhex(d["grid"]), np.uint8).reshape(16, 16, 3)
-    return _smooth(g, d["w"], d["h"])
+    return hvqfs.crq_smooth(_lattice(g, d["w"], d["h"], 2), d["w"], d["h"], 2)
 
 
 def sample(name, d):
@@ -156,8 +162,14 @@ def build(retail, hooks=()):
                     out = hook("still/" + key, pic["fs"][key])
                     if out is not None:
                         break
-                e["raw"] = hvqfs.crq(hvqfs.rgba5551(still(key, pic["fs"][key]) if out is None else out))
+                e["raw"] = still(key, pic["fs"][key]) if out is None else _picture(out)
                 e["comp"] = None
+                n += 1
+                continue
+            if (d, f) in images.GLYPH4:
+                g = tex[f"{d}/{f}/glyphs"]
+                lv = (G.unpack_alpha2(g["alpha2"], g["w"], 1) / 85).astype(np.uint8).ravel()
+                e["raw"], e["comp"] = images.glyph_rebuild(e["raw"], images.GLYPH4[(d, f)], lv), None
                 n += 1
                 continue
             if not _selected(d, f, images.kind(e["raw"])):

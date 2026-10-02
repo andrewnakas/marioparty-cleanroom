@@ -61,6 +61,12 @@ def crq(px):
     return b"CRQ1" + bytes(12) + struct.pack(">HH", w, h) + bytes(12) + buf.raw[:n]
 
 
+def crq_smooth(lattice, w, h, k):
+    """RGB uint8 lattice ((h >> k) + 1, (w >> k) + 1, 3) -> CRQ2 file (the decoder interpolates)."""
+    assert lattice.shape == ((h >> k) + 1, (w >> k) + 1, 3) and w % (1 << k) == 0 and h % (1 << k) == 0
+    return b"CRQ2" + bytes(12) + struct.pack(">HHB", w, h, k) + bytes(11) + lattice.astype(np.uint8).tobytes()
+
+
 def uncrq(data):
     w, h = struct.unpack_from(">HH", data, 16)
     out = np.zeros((h, w), np.uint16)

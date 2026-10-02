@@ -28,6 +28,6 @@ elif sys.argv[3] == "crq":
     b.put_hvqfs(bgs)
     b.put_decoder()
 else:
-    b.put_mainfs(dirs, force_move=True)
+    raise SystemExit('reloc test retired: tables never move')
 open(sys.argv[2], "wb").write(b.finish())
 print(sys.argv[3], b.log)

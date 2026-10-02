@@ -126,16 +126,17 @@ def _grey(v, a=None):
 # ---------------------------------------------------------------- ImgPack
 
 def is_imgpack(raw):
-    if len(raw) < 0x2C or raw[:4] != b"\0\0\0\x20":
+    if len(raw) < 0x2C or struct.unpack_from(">I", raw, 0)[0] not in (0x20, 0x1B):     # two header lengths exist
         return False
     e0, u, i, p = struct.unpack_from(">4I", raw, 0)
     n = struct.unpack_from(">H", raw, 16)[0]
-    return 0 < n < 4000 and 0x20 + 12 * n <= u <= i <= p <= len(raw) and raw[0x19] in (4, 8, 16, 32)
+    return 0 < n < 4000 and e0 + 12 * n <= u <= i <= p <= len(raw) and raw[0x19] in (4, 8, 16, 32)
 
 
 def _pack_entries(raw):
     n = struct.unpack_from(">H", raw, 16)[0]
-    return [struct.unpack_from(">IHH", raw, 0x20 + 12 * k) for k in range(n)]
+    e0 = struct.unpack_from(">I", raw, 0)[0]
+    return [struct.unpack_from(">IHH", raw, e0 + 12 * k) for k in range(n)]
 
 
 def _pack_find(raw):
@@ -306,8 +307,27 @@ def _form_rebuild(raw, new):
 def is_raw32(raw):
     if len(raw) < 16:
         return False
-    t, w, h, w2 = struct.unpack_from(">4I", raw, 0)
-    return t == 4 and w == w2 and 0 < w <= 256 and 0 < h <= 256 and len(raw) == 16 + w * h * 4
+    t, bpp, w, h = struct.unpack_from(">4I", raw, 0)
+    return t == 4 and bpp == 32 and 0 < w <= 256 and 0 < h <= 256 and len(raw) == 16 + w * h * 4
+
+
+# ---------------------------------------------------------------- glyph sheets (no container header of their own)
+# 0/122: three sections (u32 offsets 0xc, 0x9c, 0x81c): colours, metrics, then 4-bit glyph rows (5 bytes per row).
+# 0/134: a 2-bit debug font; a 2-bit image is its own 2-bit outline, so it is a kept fact as it stands.
+GLYPH4 = {(0, 122): 0x81C}
+KEPT_2BIT = {(0, 134)}
+
+
+def glyph_levels(raw, start):
+    """4-bit glyph data -> uint8 array of nibbles."""
+    a = np.frombuffer(raw[start:], np.uint8)
+    return np.stack([a >> 4, a & 15], 1).ravel()
+
+
+def glyph_rebuild(raw, start, levels2):
+    """levels2: 2-bit level per nibble (the kept outline) -> file with 4-bit glyphs at levels 0/5/10/15."""
+    v = (np.asarray(levels2, np.uint8) * 5).reshape(-1, 2)
+    return raw[:start] + ((v[:, 0] << 4) | v[:, 1]).astype(np.uint8).tobytes()
 
 
 # ---------------------------------------------------------------- public
@@ -333,7 +353,7 @@ def find(raw):
     if k == "form":
         return _form_find(raw)
     if k == "raw32":
-        w, h = struct.unpack_from(">II", raw, 4)
+        w, h = struct.unpack_from(">II", raw, 8)
         return [Img("r", w, h, "rgba", "", np.frombuffer(raw[16:], np.uint8).reshape(h, w, 4).copy())]
     return None
 

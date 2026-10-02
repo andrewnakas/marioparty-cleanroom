@@ -39,6 +39,9 @@ def textures(rom):
                 continue
             for im in ims or ():
                 out[f"{d}/{f}/{im.key}"] = fact(im)
+            if (d, f) in images.GLYPH4:
+                lv = images.glyph_levels(e["raw"], images.GLYPH4[(d, f)])
+                out[f"{d}/{f}/glyphs"] = {"w": len(lv), "h": 1, "mode": "glyph4", "alpha2": S.alpha2(lv * 17)}
     return out, kinds, skipped
 
 
